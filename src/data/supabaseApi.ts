@@ -1,10 +1,10 @@
 // Supabase-backed implementation of the data Api. Requires a configured project
 // (migrations applied). Not exercised by the offline test suite; the Api type keeps
 // it in sync with the mock implementation.
-import { appUrl } from '../lib/env'
-import { getMissingAthleteFields } from '../lib/profile'
-import { getPassportStatus } from '../lib/passport'
-import { supabase } from '../lib/supabase'
+import { appUrl } from "../lib/env";
+import { getMissingAthleteFields } from "../lib/profile";
+import { getPassportStatus } from "../lib/passport";
+import { supabase } from "../lib/supabase";
 import type {
   AssistantDraft,
   Athlete,
@@ -12,7 +12,7 @@ import type {
   CoachAthleteView,
   CoachEvaluation,
   Profile,
-} from '../types/database'
+} from "../types/database";
 import type {
   Api,
   AthletePatch,
@@ -23,62 +23,58 @@ import type {
   NewAssistantDraft,
   NewCampaign,
   SignInResult,
-} from './types'
+} from "./types";
 
 function client() {
   if (!supabase) {
-    throw new Error('Supabase client is not configured')
+    throw new Error("Supabase client is not configured");
   }
-  return supabase
+  return supabase;
 }
 
 async function currentAthlete(profileId: string): Promise<Athlete | null> {
   const { data } = await client()
-    .from('athletes')
-    .select('*')
-    .eq('profile_id', profileId)
-    .maybeSingle()
-  return (data as Athlete | null) ?? null
+    .from("athletes")
+    .select("*")
+    .eq("profile_id", profileId)
+    .maybeSingle();
+  return (data as Athlete | null) ?? null;
 }
 
 export const supabaseApi: Api = {
   async getCurrentProfile(): Promise<Profile | null> {
-    const { data: userData } = await client().auth.getUser()
-    const user = userData.user
+    const { data: userData } = await client().auth.getUser();
+    const user = userData.user;
     if (!user) {
-      return null
+      return null;
     }
-    const { data } = await client()
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle()
-    return (data as Profile | null) ?? null
+    const { data } = await client().from("profiles").select("*").eq("id", user.id).maybeSingle();
+    return (data as Profile | null) ?? null;
   },
 
   async signIn(email: string): Promise<SignInResult> {
     const { error } = await client().auth.signInWithOtp({
       email,
       options: { emailRedirectTo: `${appUrl}/auth/callback` },
-    })
+    });
     if (error) {
-      throw error
+      throw error;
     }
-    return { status: 'magic_link_sent' }
+    return { status: "magic_link_sent" };
   },
 
   async signOut() {
-    await client().auth.signOut()
+    await client().auth.signOut();
   },
 
   async getAthleteForProfile(profileId: string) {
-    return currentAthlete(profileId)
+    return currentAthlete(profileId);
   },
 
   async updateOwnAthlete(profileId: string, patch: AthletePatch) {
-    const athlete = await currentAthlete(profileId)
+    const athlete = await currentAthlete(profileId);
     if (!athlete) {
-      throw new Error('Athlete not found for profile')
+      throw new Error("Athlete not found for profile");
     }
     const audits = (Object.entries(patch) as [keyof AthletePatch, unknown][])
       .filter(([key, value]) => athlete[key] !== value)
@@ -88,159 +84,153 @@ export const supabaseApi: Api = {
         field_name: key as string,
         old_value: athlete[key] === null ? null : String(athlete[key]),
         new_value: value === null || value === undefined ? null : String(value),
-        status: 'pending' as const,
-      }))
+        status: "pending" as const,
+      }));
     if (audits.length > 0) {
-      await client().from('change_requests').insert(audits)
+      await client().from("change_requests").insert(audits);
     }
     const { data, error } = await client()
-      .from('athletes')
+      .from("athletes")
       .update(patch)
-      .eq('id', athlete.id)
-      .select('*')
-      .single()
+      .eq("id", athlete.id)
+      .select("*")
+      .single();
     if (error) {
-      throw error
+      throw error;
     }
-    return data as Athlete
+    return data as Athlete;
   },
 
   async getCampaignsForProfile(profileId: string): Promise<CampaignWithMembership[]> {
-    const athlete = await currentAthlete(profileId)
+    const athlete = await currentAthlete(profileId);
     if (!athlete) {
-      return []
+      return [];
     }
     const { data } = await client()
-      .from('campaign_members')
-      .select('status, campaigns(*)')
-      .eq('athlete_id', athlete.id)
-    const rows = (data ?? []) as unknown as { status: string; campaigns: Campaign }[]
+      .from("campaign_members")
+      .select("status, campaigns(*)")
+      .eq("athlete_id", athlete.id);
+    const rows = (data ?? []) as unknown as { status: string; campaigns: Campaign }[];
     return rows.map((r) => ({
       ...r.campaigns,
-      memberStatus: r.status as CampaignWithMembership['memberStatus'],
-    }))
+      memberStatus: r.status as CampaignWithMembership["memberStatus"],
+    }));
   },
 
   async listAthletes() {
-    const { data } = await client().from('athletes').select('*')
-    return (data ?? []) as Athlete[]
+    const { data } = await client().from("athletes").select("*");
+    return (data ?? []) as Athlete[];
   },
 
   async getAdminStats() {
-    const athletes = (await this.listAthletes()) as Athlete[]
-    const campaigns = await this.listCampaigns()
-    const reviews = await this.listChangeRequests()
+    const athletes = (await this.listAthletes()) as Athlete[];
+    const campaigns = await this.listCampaigns();
+    const reviews = await this.listChangeRequests();
     return {
       totalAthletes: athletes.length,
-      activeCampaigns: campaigns.filter((c) => c.status === 'active').length,
-      incompleteProfiles: athletes.filter((a) => getMissingAthleteFields(a).length > 0)
-        .length,
+      activeCampaigns: campaigns.filter((c) => c.status === "active").length,
+      incompleteProfiles: athletes.filter((a) => getMissingAthleteFields(a).length > 0).length,
       passportExpiringSoon: athletes.filter(
-        (a) => getPassportStatus(a.passport_expiry) === 'expiring_soon',
+        (a) => getPassportStatus(a.passport_expiry) === "expiring_soon",
       ).length,
       pendingEvaluations: 0,
-      pendingReviewItems: reviews.filter((r) => r.status === 'pending').length,
-    }
+      pendingReviewItems: reviews.filter((r) => r.status === "pending").length,
+    };
   },
 
   async listCampaigns() {
-    const { data } = await client().from('campaigns').select('*')
-    return (data ?? []) as Campaign[]
+    const { data } = await client().from("campaigns").select("*");
+    return (data ?? []) as Campaign[];
   },
 
   async getCampaign(id: string) {
-    const { data } = await client()
-      .from('campaigns')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle()
-    return (data as Campaign | null) ?? null
+    const { data } = await client().from("campaigns").select("*").eq("id", id).maybeSingle();
+    return (data as Campaign | null) ?? null;
   },
 
   async createCampaign(input: NewCampaign, createdBy: string) {
     const { data, error } = await client()
-      .from('campaigns')
+      .from("campaigns")
       .insert({ ...input, created_by: createdBy })
-      .select('*')
-      .single()
+      .select("*")
+      .single();
     if (error) {
-      throw error
+      throw error;
     }
-    return data as Campaign
+    return data as Campaign;
   },
 
   async getCampaignReadiness(campaignId: string): Promise<CampaignReadinessEntry[]> {
     const { data } = await client()
-      .from('campaign_members')
-      .select('status, athletes(*)')
-      .eq('campaign_id', campaignId)
+      .from("campaign_members")
+      .select("status, athletes(*)")
+      .eq("campaign_id", campaignId);
     const { data: evals } = await client()
-      .from('coach_evaluations')
-      .select('athlete_id, status')
-      .eq('campaign_id', campaignId)
-    const evalRows = (evals ?? []) as { athlete_id: string; status: string }[]
-    const rows = (data ?? []) as unknown as { status: string; athletes: Athlete }[]
+      .from("coach_evaluations")
+      .select("athlete_id, status")
+      .eq("campaign_id", campaignId);
+    const evalRows = (evals ?? []) as { athlete_id: string; status: string }[];
+    const rows = (data ?? []) as unknown as { status: string; athletes: Athlete }[];
     return rows.map((r) => {
-      const a = r.athletes
-      const ev = evalRows.find((e) => e.athlete_id === a.id)
+      const a = r.athletes;
+      const ev = evalRows.find((e) => e.athlete_id === a.id);
       return {
         athleteId: a.id,
-        name: a.preferred_name || a.legal_name || 'Unknown athlete',
+        name: a.preferred_name || a.legal_name || "Unknown athlete",
         missingFields: getMissingAthleteFields(a),
         passportStatus: getPassportStatus(a.passport_expiry),
         profileStatus: a.profile_status,
-        memberStatus: r.status as CampaignReadinessEntry['memberStatus'],
+        memberStatus: r.status as CampaignReadinessEntry["memberStatus"],
         hasEvaluation: ev !== undefined,
-        evaluationStatus: (ev?.status as CampaignReadinessEntry['evaluationStatus']) ?? null,
-      }
-    })
+        evaluationStatus: (ev?.status as CampaignReadinessEntry["evaluationStatus"]) ?? null,
+      };
+    });
   },
 
   async listChangeRequests(): Promise<ChangeRequestView[]> {
     const { data } = await client()
-      .from('change_requests')
-      .select('*, athletes(legal_name, preferred_name)')
+      .from("change_requests")
+      .select("*, athletes(legal_name, preferred_name)");
     const rows = (data ?? []) as (ChangeRequestRow & {
-      athletes: { legal_name: string | null; preferred_name: string | null } | null
-    })[]
+      athletes: { legal_name: string | null; preferred_name: string | null } | null;
+    })[];
     return rows.map((r) => ({
       id: r.id,
       athleteId: r.athlete_id,
-      athleteName:
-        r.athletes?.preferred_name || r.athletes?.legal_name || 'Unknown athlete',
+      athleteName: r.athletes?.preferred_name || r.athletes?.legal_name || "Unknown athlete",
       fieldName: r.field_name,
       oldValue: r.old_value,
       newValue: r.new_value,
       status: r.status,
       createdAt: r.created_at,
-    }))
+    }));
   },
 
   async reviewChangeRequest(id, decision, reviewerId) {
     const { error } = await client()
-      .from('change_requests')
+      .from("change_requests")
       .update({
         status: decision,
         reviewed_by: reviewerId,
         reviewed_at: new Date().toISOString(),
       })
-      .eq('id', id)
+      .eq("id", id);
     if (error) {
-      throw error
+      throw error;
     }
   },
 
   async listAssistantDrafts(createdBy: string) {
     const { data } = await client()
-      .from('assistant_drafts')
-      .select('*')
-      .eq('created_by', createdBy)
-    return (data ?? []) as AssistantDraft[]
+      .from("assistant_drafts")
+      .select("*")
+      .eq("created_by", createdBy);
+    return (data ?? []) as AssistantDraft[];
   },
 
   async createAssistantDraft(input: NewAssistantDraft) {
     const { data, error } = await client()
-      .from('assistant_drafts')
+      .from("assistant_drafts")
       .insert({
         created_by: input.createdBy,
         draft_type: input.draftType,
@@ -248,40 +238,40 @@ export const supabaseApi: Api = {
         campaign_id: input.campaignId ?? null,
         content: input.content,
       })
-      .select('*')
-      .single()
+      .select("*")
+      .single();
     if (error) {
-      throw error
+      throw error;
     }
-    return data as AssistantDraft
+    return data as AssistantDraft;
   },
 
   async getCoachCampaigns(coachProfileId: string) {
     const { data } = await client()
-      .from('campaign_coaches')
-      .select('campaigns(*)')
-      .eq('coach_profile_id', coachProfileId)
-    const rows = (data ?? []) as unknown as { campaigns: Campaign }[]
-    return rows.map((r) => r.campaigns)
+      .from("campaign_coaches")
+      .select("campaigns(*)")
+      .eq("coach_profile_id", coachProfileId);
+    const rows = (data ?? []) as unknown as { campaigns: Campaign }[];
+    return rows.map((r) => r.campaigns);
   },
 
   async getCoachAthletes(campaignId: string): Promise<CoachAthleteView[]> {
     const { data } = await client()
-      .from('coach_athlete_view')
-      .select('*')
-      .eq('campaign_id', campaignId)
-    return (data ?? []) as CoachAthleteView[]
+      .from("coach_athlete_view")
+      .select("*")
+      .eq("campaign_id", campaignId);
+    return (data ?? []) as CoachAthleteView[];
   },
 
   async getEvaluation(campaignId, athleteId, coachProfileId) {
     const { data } = await client()
-      .from('coach_evaluations')
-      .select('*')
-      .eq('campaign_id', campaignId)
-      .eq('athlete_id', athleteId)
-      .eq('coach_profile_id', coachProfileId)
-      .maybeSingle()
-    return (data as CoachEvaluation | null) ?? null
+      .from("coach_evaluations")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .eq("athlete_id", athleteId)
+      .eq("coach_profile_id", coachProfileId)
+      .maybeSingle();
+    return (data as CoachEvaluation | null) ?? null;
   },
 
   async saveEvaluation(input: EvaluationInput): Promise<CoachEvaluation> {
@@ -301,34 +291,34 @@ export const supabaseApi: Api = {
       overall_notes: input.overall_notes ?? null,
       recommendation: input.recommendation ?? null,
       status: input.status,
-    }
-    const row = input.id ? { id: input.id, ...payload } : payload
+    };
+    const row = input.id ? { id: input.id, ...payload } : payload;
     const { data, error } = await client()
-      .from('coach_evaluations')
+      .from("coach_evaluations")
       .upsert(row)
-      .select('*')
-      .single()
+      .select("*")
+      .single();
     if (error) {
-      throw error
+      throw error;
     }
-    return data as CoachEvaluation
+    return data as CoachEvaluation;
   },
 
   async listCoachEvaluations(coachProfileId: string) {
     const { data } = await client()
-      .from('coach_evaluations')
-      .select('*')
-      .eq('coach_profile_id', coachProfileId)
-    return (data ?? []) as CoachEvaluation[]
+      .from("coach_evaluations")
+      .select("*")
+      .eq("coach_profile_id", coachProfileId);
+    return (data ?? []) as CoachEvaluation[];
   },
-}
+};
 
 interface ChangeRequestRow {
-  id: string
-  athlete_id: string
-  field_name: string
-  old_value: string | null
-  new_value: string | null
-  status: 'pending' | 'approved' | 'rejected'
-  created_at: string
+  id: string;
+  athlete_id: string;
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
 }

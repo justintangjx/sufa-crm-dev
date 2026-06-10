@@ -5,9 +5,13 @@ this repository. Read them before writing code.
 
 ## Before coding
 
-1. **Read the product/build spec** for SUFA CRM (the canonical requirements: roles,
-   routes, database schema, RLS, assistant behaviour). Do not invent requirements.
+1. **Read the product/build spec** in [`prd.md`](prd.md) for SUFA CRM (the canonical
+   requirements: roles, routes, database schema, RLS, assistant behaviour). Do not invent
+   requirements.
 2. Read [`docs/tooling.md`](docs/tooling.md) to know the commands and conventions.
+3. Read [`docs/agent-context.md`](docs/agent-context.md) and
+   [`docs/mvp-next.md`](docs/mvp-next.md) for the current implementation map and next
+   build slices.
 
 ## Core principles (do not violate)
 

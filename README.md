@@ -1,6 +1,6 @@
 # Singapore Ultimate Frisbee Association CRM Agent
 
-To serve players, admins and coaches of Singapore Ultimate Frisbee Association through a CRM agent. 
+To serve players, admins and coaches of Singapore Ultimate Frisbee Association through a CRM agent.
 
 ## React Compiler
 
