@@ -8,10 +8,11 @@ this repository. Read them before writing code.
 1. **Read the product/build spec** in [`prd.md`](prd.md) for SUFA CRM (the canonical
    requirements: roles, routes, database schema, RLS, assistant behaviour). Do not invent
    requirements.
-2. Read [`docs/tooling.md`](docs/tooling.md) to know the commands and conventions.
-3. Read [`docs/agent-context.md`](docs/agent-context.md) and
-   [`docs/mvp-next.md`](docs/mvp-next.md) for the current implementation map and next
-   build slices.
+2. Read [`docs/context.md`](docs/context.md) for the current implementation map,
+   deployment state, demo flows, and next build queue.
+3. Read [`docs/tooling.md`](docs/tooling.md) to know the commands and conventions.
+4. For multi-agent work, read
+   [`docs/agent-orchestration.md`](docs/agent-orchestration.md).
 
 ## Core principles (do not violate)
 
@@ -30,6 +31,9 @@ this repository. Read them before writing code.
 - Write **boring, explicit code** over clever abstractions.
 - Match the surrounding code and comment style. Don't add narration comments.
 - **Ask before adding major dependencies.** Use pnpm (`pnpm add` / `pnpm add -D`).
+- If multiple coding agents are active, respect the ownership lanes in
+  [`docs/agent-orchestration.md`](docs/agent-orchestration.md). Do not edit a role-owned
+  file at the same time as another agent without coordination.
 
 ## Tests and checks are the judge
 
