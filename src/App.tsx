@@ -13,6 +13,7 @@ import {
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { api } from "./data";
+import { useMockBackend } from "./lib/env";
 import type {
   AdminStats,
   AthletePatch,
@@ -38,9 +39,42 @@ import type {
   Role,
 } from "./types/database";
 
+function DiscMark({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 48 48"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <ellipse
+        cx="24"
+        cy="24"
+        rx="20"
+        ry="9"
+        transform="rotate(-18 24 24)"
+        stroke="currentColor"
+        strokeOpacity="0.55"
+        strokeWidth="3"
+      />
+      <ellipse
+        cx="24"
+        cy="24"
+        rx="11"
+        ry="4.5"
+        transform="rotate(-18 24 24)"
+        stroke="currentColor"
+        strokeWidth="2.5"
+      />
+    </svg>
+  );
+}
+
 function LoadingPage() {
   return (
-    <main className="app-main">
+    <main className="loading-screen">
+      <DiscMark className="loading-disc" />
       <p className="muted">Loading SUFA CRM...</p>
     </main>
   );
@@ -144,65 +178,116 @@ function AppLayout() {
   );
 }
 
+const demoAccounts = [
+  { email: "admin@sufa.test", label: "Admin" },
+  { email: "coach@sufa.test", label: "Coach" },
+  { email: "alice@sufa.test", label: "Player (Alice)" },
+] as const;
+
 function LoginPage() {
   const { profile, signIn } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ tone: "ok" | "warn"; message: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   if (profile) {
     return <Navigate to={getRoleHome(profile.role)} replace />;
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleSignIn(targetEmail: string) {
     setSubmitting(true);
     setStatus(null);
     try {
-      const result = await signIn(email);
+      const result = await signIn(targetEmail);
       if (result.status === "signed_in") {
         navigate(getRoleHome(result.profile.role));
         return;
       }
       if (result.status === "unknown_email") {
-        setStatus("No SUFA CRM account was found for that email.");
+        setStatus({ tone: "warn", message: "No SUFA CRM account was found for that email." });
         return;
       }
-      setStatus("Check your email for your login link.");
+      setStatus({ tone: "ok", message: "Check your email for your login link." });
     } finally {
       setSubmitting(false);
     }
   }
 
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void handleSignIn(email);
+  }
+
   return (
     <div className="auth-screen">
-      <section className="card auth-card">
-        <PageHead
-          title="Sign in to SUFA CRM"
-          subtitle="Use your SUFA email to request a magic link."
-        />
-        <form onSubmit={(event) => void handleSubmit(event)}>
-          <div className="field">
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="admin@sufa.test"
-              required
-            />
+      <aside className="auth-brand">
+        <div className="auth-brand-inner">
+          <div className="auth-logo">
+            <DiscMark />
           </div>
-          <button type="submit" className="btn primary" disabled={submitting}>
-            {submitting ? "Sending..." : "Send magic link"}
-          </button>
-        </form>
-        {status ? <p className="alert warn">{status}</p> : null}
-        <p className="muted">
-          Mock users: admin@sufa.test, coach@sufa.test, alice@sufa.test, ben@sufa.test.
-        </p>
-      </section>
+          <p className="auth-wordmark">SUFA CRM</p>
+          <h1>Every roster, tournament-ready.</h1>
+          <p className="auth-sub">
+            Player profiles, travel documents, and coach evaluations for Singapore Ultimate
+            campaigns &mdash; from SEA Games to Worlds.
+          </p>
+          <ul className="auth-points">
+            <li>
+              <span>Players</span> keep profiles and travel documents up to date.
+            </li>
+            <li>
+              <span>Admins</span> track campaign readiness and review profile changes.
+            </li>
+            <li>
+              <span>Coaches</span> turn rough notes into structured evaluations.
+            </li>
+          </ul>
+        </div>
+      </aside>
+      <main className="auth-form-pane">
+        <div className="auth-form-inner">
+          <section className="card auth-card">
+            <PageHead title="Sign in" subtitle="Use your SUFA email to request a magic link." />
+            <form onSubmit={handleSubmit}>
+              <div className="field">
+                <label htmlFor="email">Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@sufa.org.sg"
+                  required
+                />
+              </div>
+              <button type="submit" className="btn primary auth-submit" disabled={submitting}>
+                {submitting ? "Sending..." : "Send magic link"}
+              </button>
+            </form>
+            {status ? <p className={`alert ${status.tone}`}>{status.message}</p> : null}
+            {useMockBackend ? (
+              <div className="auth-demo">
+                <p className="muted">Demo mode &mdash; sign in instantly as:</p>
+                <div className="btn-row">
+                  {demoAccounts.map((account) => (
+                    <button
+                      key={account.email}
+                      type="button"
+                      className="btn sm"
+                      disabled={submitting}
+                      onClick={() => void handleSignIn(account.email)}
+                    >
+                      {account.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </section>
+          <p className="auth-footnote">SUFA &middot; Singapore Ultimate &mdash; internal demo</p>
+        </div>
+      </main>
     </div>
   );
 }
