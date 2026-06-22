@@ -2,6 +2,7 @@
 // replace ONLY the text-generation parts, never permission checks or DB queries.
 
 import type { Athlete, ProfileStatus, Recommendation } from "../types/database";
+import { coachNoteDraftToFormText, createDeterministicCoachNoteDraft } from "./coachNotes";
 import { getPassportStatus, passportStatusLabel, type PassportStatus } from "./passport";
 import { getMissingAthleteFields, type MissingField } from "./profile";
 
@@ -109,81 +110,14 @@ export function draftPlayerReminder(input: ReminderInput): string {
   return lines.join("\n");
 }
 
-const STRENGTH_KEYWORDS = [
-  "strong",
-  "great",
-  "good",
-  "excellent",
-  "solid",
-  "reliable",
-  "fast",
-  "accurate",
-  "confident",
-  "calm",
-];
-
-const DEVELOPMENT_KEYWORDS = [
-  "needs",
-  "improve",
-  "work on",
-  "weak",
-  "struggle",
-  "inconsistent",
-  "lacks",
-  "should",
-  "more",
-];
-
-function splitSentences(notes: string): string[] {
-  return notes
-    .split(/[\n.!;]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-function includesAny(haystack: string, needles: readonly string[]): boolean {
-  return needles.some((n) => haystack.includes(n));
-}
-
-function detectRecommendation(text: string): Recommendation | null {
-  if (includesAny(text, ["not select", "not selected", "cut", "drop", "not ready"])) {
-    return "not_selected";
-  }
-  if (includesAny(text, ["reserve", "backup", "bench"])) {
-    return "reserve";
-  }
-  if (includesAny(text, ["develop", "potential", "project", "young", "raw"])) {
-    return "development";
-  }
-  if (includesAny(text, ["select", "starter", "lock", "definite"])) {
-    return "selected";
-  }
-  return null;
-}
-
 // Convert rough free-text notes into a structured DRAFT evaluation. The coach must
 // review and confirm before anything is saved (see guardrails in the spec).
 export function structureCoachNotes(notes: string): StructuredEvaluationDraft {
-  const sentences = splitSentences(notes);
-  const strengths: string[] = [];
-  const development: string[] = [];
-  const overall: string[] = [];
-
-  for (const sentence of sentences) {
-    const lower = sentence.toLowerCase();
-    if (includesAny(lower, DEVELOPMENT_KEYWORDS)) {
-      development.push(sentence);
-    } else if (includesAny(lower, STRENGTH_KEYWORDS)) {
-      strengths.push(sentence);
-    } else {
-      overall.push(sentence);
-    }
-  }
-
+  const text = coachNoteDraftToFormText(createDeterministicCoachNoteDraft(notes));
   return {
-    strengths: strengths.join(". "),
-    developmentAreas: development.join(". "),
-    overallNotes: overall.join(". ") || notes.trim(),
-    recommendation: detectRecommendation(notes.toLowerCase()),
+    strengths: text.strengths,
+    developmentAreas: text.developmentAreas,
+    overallNotes: text.overallNotes,
+    recommendation: null,
   };
 }

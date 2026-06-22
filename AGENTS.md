@@ -24,6 +24,11 @@ this repository. Read them before writing code.
 - **Role-based access is a hard boundary.** Players, admins, and coaches see only what
   their role permits. Coaches never see passport/NRIC/admin-sensitive fields by default.
 - **Auditability.** Important profile changes record who/what/when.
+- **Production-safe by default.** If a feature requires extra deployment/setup before it
+  works in production (new migrations, Edge Functions, provider/API keys, webhooks,
+  n8n/Google setup, background jobs, external services, or manual data seeding), ship it
+  behind a feature flag that defaults off in production. The app must keep working, and
+  the default path must not call missing infrastructure.
 
 ## Working style
 
@@ -31,6 +36,9 @@ this repository. Read them before writing code.
 - Write **boring, explicit code** over clever abstractions.
 - Match the surrounding code and comment style. Don't add narration comments.
 - **Ask before adding major dependencies.** Use pnpm (`pnpm add` / `pnpm add -D`).
+- New feature flags should be explicit environment variables, documented in
+  `.env.example` when they are client-visible, and named by capability
+  (for example `VITE_ENABLE_COACH_LLM`). Prefer safe fallback UI over broken buttons.
 - If multiple coding agents are active, respect the ownership lanes in
   [`docs/agent-orchestration.md`](docs/agent-orchestration.md). Do not edit a role-owned
   file at the same time as another agent without coordination.
@@ -52,3 +60,5 @@ this repository. Read them before writing code.
 3. Code is formatted (`pnpm format`).
 4. Relevant unit/component tests pass and new behaviour is covered.
 5. RLS/role boundaries are intact.
+6. Any feature that depends on unprovisioned production infrastructure has a
+   production-default-off feature flag, documented setup steps, and a verified fallback.

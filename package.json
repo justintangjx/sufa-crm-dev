@@ -15,10 +15,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "eval:coach:deterministic": "vitest run src/lib/coachNotes.test.ts src/evals/coach-notes/coachNotes.eval.test.ts src/evals/coach-notes/multi-turn.eval.test.ts",
+    "eval:coach:live": "node scripts/eval-coach-live.mjs",
+    "eval:coach:compare": "node scripts/eval-coach-compare.mjs",
     "e2e": "playwright test",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
   },
   "dependencies": {
+    "@fontsource-variable/space-grotesk": "^5.2.10",
     "@supabase/supabase-js": "^2.108.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

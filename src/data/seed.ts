@@ -7,6 +7,9 @@ import type {
   CampaignMember,
   ChangeRequest,
   CoachEvaluation,
+  CoachNoteGenerationRun,
+  CoachNoteSession,
+  CoachNoteTurn,
   Profile,
 } from "../types/database";
 
@@ -19,6 +22,9 @@ export interface MockData {
   evaluations: CoachEvaluation[];
   changeRequests: ChangeRequest[];
   assistantDrafts: AssistantDraft[];
+  coachNoteGenerationRuns: CoachNoteGenerationRun[];
+  coachNoteSessions: CoachNoteSession[];
+  coachNoteTurns: CoachNoteTurn[];
 }
 
 const TS = "2026-01-01T00:00:00.000Z";
@@ -123,6 +129,18 @@ export function buildSeed(): MockData {
       created_at: TS,
       updated_at: TS,
     },
+    {
+      id: "c-u24",
+      name: "U24 Nationals 2025",
+      team: "Mixed",
+      start_date: "2025-03-01",
+      end_date: "2025-03-05",
+      location: "Singapore",
+      status: "completed",
+      created_by: "p-admin",
+      created_at: TS,
+      updated_at: TS,
+    },
   ];
 
   const campaignMembers: CampaignMember[] = [
@@ -141,7 +159,28 @@ export function buildSeed(): MockData {
     },
   ];
 
-  const evaluations: CoachEvaluation[] = [];
+  const evaluations: CoachEvaluation[] = [
+    {
+      id: "eval-alice-u24",
+      campaign_id: "c-u24",
+      athlete_id: "a-alice",
+      coach_profile_id: "p-coach",
+      throwing_rating: 4,
+      cutting_rating: 4,
+      defense_rating: 3,
+      fitness_rating: 4,
+      game_iq_rating: 4,
+      communication_rating: 4,
+      coachability_rating: 5,
+      strengths: "Strong downfield speed and confident hucks.",
+      development_areas: "Reset defense positioning under pressure.",
+      overall_notes: "Reliable handler rotation player during U24 camp.",
+      recommendation: "selected",
+      status: "submitted",
+      created_at: "2025-03-06T00:00:00.000Z",
+      updated_at: "2025-03-06T00:00:00.000Z",
+    },
+  ];
 
   const changeRequests: ChangeRequest[] = [
     {
@@ -167,5 +206,8 @@ export function buildSeed(): MockData {
     evaluations,
     changeRequests,
     assistantDrafts: [],
+    coachNoteGenerationRuns: [],
+    coachNoteSessions: [],
+    coachNoteTurns: [],
   };
 }

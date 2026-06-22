@@ -10,6 +10,9 @@ It does not replace `prd.md`, which remains the canonical product spec.
 - Agent rules: `AGENTS.md`
 - Tooling commands: `docs/tooling.md`
 - Multi-agent workflow: `docs/agent-orchestration.md`
+- Future Google Sheets campaign snapshot implementation:
+  `docs/google-sheets-snapshots.md`
+- Coach LLM architecture and evaluation: `docs/coach-llm.md`
 - Database source of truth: `supabase/migrations/`
 - Runtime data boundary: `src/data/types.ts`
 
@@ -61,6 +64,10 @@ Known gaps:
   an audit trail through change requests.
 - Assistant drafts must not be auto-sent or auto-submitted.
 - Assistant suggestions must not approve/reject profile changes or submit evaluations.
+- Features that need extra production setup must be feature-flagged off by default until
+  that setup is complete. This includes new migrations, Supabase Edge Functions,
+  provider/API secrets, webhooks, n8n/Google integrations, background jobs, or manual
+  seed/configuration steps. The safe default must not call missing infrastructure.
 
 ## Runtime Modes
 
@@ -71,6 +78,10 @@ The app chooses a backend in `src/data/index.ts`.
 - In Vitest/test mode, it always uses the mock backend even if `.env.local` contains
   Supabase credentials.
 - Both implementations satisfy the `Api` interface in `src/data/types.ts`.
+- Client-visible feature flags use `VITE_*` environment variables and should default to
+  production-safe behaviour. Example: `VITE_ENABLE_COACH_LLM=false` keeps coach note
+  structuring on the local deterministic path until the Edge Function and model secrets
+  are deployed.
 
 Mock backend seed users:
 
@@ -173,14 +184,16 @@ click Review risk
 click Suggest decisions
 ```
 
-Coach assistant:
+Coach evaluation copilot (not a chatbot):
 
 ```txt
 /coach
 open assigned campaign
 evaluate a player
+review prior evaluations panel (read-only)
 paste rough notes
 click Structure notes
+answer ambiguity cards or add more notes / regenerate section if needed
 review fields
 submit evaluation
 ```

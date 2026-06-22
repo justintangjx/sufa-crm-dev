@@ -26,6 +26,10 @@ export type AssistantDraftType = "player_reminder" | "coach_evaluation_structuri
 
 export type AssistantDraftStatus = "draft" | "approved" | "discarded";
 
+export type CoachNoteGenerationStatus = "succeeded" | "failed";
+export type CoachNoteGenerationSource = "llm" | "deterministic";
+export type CoachNoteFeedback = "useful" | "incorrect" | "missing_context";
+
 export interface Profile {
   id: string;
   email: string;
@@ -147,4 +151,72 @@ export interface CoachAthleteView {
   created_at: string;
   updated_at: string;
   campaign_id: string;
+}
+
+export interface CoachNoteGenerationRun {
+  id: string;
+  campaign_id: string;
+  athlete_id: string;
+  coach_profile_id: string;
+  schema_version: number;
+  prompt_version: string;
+  provider: string;
+  model: string;
+  source: CoachNoteGenerationSource;
+  status: CoachNoteGenerationStatus;
+  redacted_input: string;
+  redacted_output: unknown;
+  validation_errors: string[];
+  latency_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost_usd: number | null;
+  repair_count: number;
+  error_code: string | null;
+  feedback: CoachNoteFeedback | null;
+  feedback_at: string | null;
+  field_edit_count: number | null;
+  normalized_edit_distance: number | null;
+  ambiguity_count: number | null;
+  session_id: string | null;
+  turn_index: number | null;
+  created_at: string;
+}
+
+export type CoachNoteSessionStatus = "active" | "completed";
+
+export interface CoachNoteSession {
+  id: string;
+  campaign_id: string;
+  athlete_id: string;
+  coach_profile_id: string;
+  accumulated_input: string;
+  turn_count: number;
+  status: CoachNoteSessionStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CoachNoteTurnAction = "structure" | "clarify" | "add_notes" | "regenerate_section";
+
+export interface CoachNoteTurn {
+  id: string;
+  session_id: string;
+  turn_index: number;
+  action: CoachNoteTurnAction;
+  payload: Record<string, unknown>;
+  draft_snapshot: unknown;
+  run_id: string | null;
+  created_at: string;
+}
+
+export interface PriorCoachEvaluation {
+  id: string;
+  campaignId: string;
+  campaignName: string;
+  submittedAt: string;
+  strengths: string | null;
+  developmentAreas: string | null;
+  overallNotes: string | null;
+  recommendation: Recommendation | null;
 }

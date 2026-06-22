@@ -13,6 +13,14 @@ import type {
   Profile,
   Recommendation,
 } from "../types/database";
+import type {
+  CoachNoteActionRequest,
+  CoachNoteEditMetricsInput,
+  CoachNoteFeedbackInput,
+  CoachNoteGenerationRequest,
+  CoachNoteGenerationResult,
+} from "../lib/coachNotes";
+import type { PriorCoachEvaluation } from "../types/database";
 
 export type SignInResult =
   | { status: "magic_link_sent" }
@@ -137,4 +145,13 @@ export interface Api {
   ): Promise<CoachEvaluation | null>;
   saveEvaluation(input: EvaluationInput): Promise<CoachEvaluation>;
   listCoachEvaluations(coachProfileId: string): Promise<CoachEvaluation[]>;
+  listOwnSubmittedEvaluations(
+    coachProfileId: string,
+    athleteId: string,
+    limit?: number,
+  ): Promise<PriorCoachEvaluation[]>;
+  coachNoteAction(input: CoachNoteActionRequest): Promise<CoachNoteGenerationResult>;
+  generateCoachNoteDraft(input: CoachNoteGenerationRequest): Promise<CoachNoteGenerationResult>;
+  submitCoachNoteFeedback(input: CoachNoteFeedbackInput): Promise<void>;
+  recordCoachNoteEditMetrics(input: CoachNoteEditMetricsInput): Promise<void>;
 }

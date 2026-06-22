@@ -5,12 +5,14 @@ import { appUrl } from "../lib/env";
 import { getMissingAthleteFields } from "../lib/profile";
 import { getPassportStatus } from "../lib/passport";
 import { supabase } from "../lib/supabase";
+import { buildAccumulatedInput } from "../lib/coachNotes";
 import type {
   AssistantDraft,
   Athlete,
   Campaign,
   CoachAthleteView,
   CoachEvaluation,
+  PriorCoachEvaluation,
   Profile,
 } from "../types/database";
 import type {
@@ -24,6 +26,7 @@ import type {
   NewCampaign,
   SignInResult,
 } from "./types";
+import type { CoachNoteActionRequest, CoachNoteGenerationRequest } from "../lib/coachNotes";
 
 function client() {
   if (!supabase) {
@@ -111,10 +114,11 @@ export const supabaseApi: Api = {
       .select("status, campaigns(*)")
       .eq("athlete_id", athlete.id);
     const rows = (data ?? []) as unknown as { status: string; campaigns: Campaign }[];
-    return rows.map((r) => ({
-      ...r.campaigns,
-      memberStatus: r.status as CampaignWithMembership["memberStatus"],
-    }));
+    return rows.map((r) =>
+      Object.assign({}, r.campaigns, {
+        memberStatus: r.status as CampaignWithMembership["memberStatus"],
+      }),
+    );
   },
 
   async listAthletes() {
@@ -310,6 +314,101 @@ export const supabaseApi: Api = {
       .select("*")
       .eq("coach_profile_id", coachProfileId);
     return (data ?? []) as CoachEvaluation[];
+  },
+
+  async listOwnSubmittedEvaluations(coachProfileId, athleteId, limit = 3) {
+    const { data: evaluations, error } = await client()
+      .from("coach_evaluations")
+      .select(
+        "id, campaign_id, strengths, development_areas, overall_notes, recommendation, updated_at",
+      )
+      .eq("coach_profile_id", coachProfileId)
+      .eq("athlete_id", athleteId)
+      .eq("status", "submitted")
+      .order("updated_at", { ascending: false })
+      .limit(limit);
+    if (error) {
+      throw error;
+    }
+    const rows = evaluations ?? [];
+    const campaignIds = [...new Set(rows.map((row) => row.campaign_id))];
+    const { data: campaigns } = await client()
+      .from("campaigns")
+      .select("id, name")
+      .in("id", campaignIds.length > 0 ? campaignIds : ["__none__"]);
+    const campaignNames = new Map(
+      (campaigns ?? []).map((campaign) => [campaign.id, campaign.name]),
+    );
+    return rows.map(
+      (evaluation): PriorCoachEvaluation => ({
+        id: evaluation.id,
+        campaignId: evaluation.campaign_id,
+        campaignName: campaignNames.get(evaluation.campaign_id) ?? evaluation.campaign_id,
+        submittedAt: evaluation.updated_at,
+        strengths: evaluation.strengths,
+        developmentAreas: evaluation.development_areas,
+        overallNotes: evaluation.overall_notes,
+        recommendation: evaluation.recommendation,
+      }),
+    );
+  },
+
+  async coachNoteAction(input: CoachNoteActionRequest) {
+    const accumulatedInput = buildAccumulatedInput(
+      input.roughNotes,
+      input.clarifications ?? [],
+      input.additionalNotes ?? "",
+    );
+    const { data, error } = await client().functions.invoke("structure-coach-notes", {
+      body: {
+        campaignId: input.campaignId,
+        athleteId: input.athleteId,
+        roughNotes: input.roughNotes,
+        action: input.action,
+        sessionId: input.sessionId,
+        clarifications: input.clarifications ?? [],
+        additionalNotes: input.additionalNotes ?? "",
+        section: input.section,
+      },
+    });
+    if (error) {
+      throw error;
+    }
+    const result = data as Awaited<ReturnType<Api["coachNoteAction"]>>;
+    return {
+      ...result,
+      accumulatedInput: result.accumulatedInput ?? accumulatedInput,
+    };
+  },
+
+  async generateCoachNoteDraft(input: CoachNoteGenerationRequest) {
+    return supabaseApi.coachNoteAction({ ...input, action: "structure" });
+  },
+
+  async submitCoachNoteFeedback(input) {
+    const { error } = await client()
+      .from("coach_note_generation_runs")
+      .update({
+        feedback: input.feedback,
+        feedback_at: new Date().toISOString(),
+      })
+      .eq("id", input.runId);
+    if (error) {
+      throw error;
+    }
+  },
+
+  async recordCoachNoteEditMetrics(input) {
+    const { error } = await client()
+      .from("coach_note_generation_runs")
+      .update({
+        field_edit_count: input.fieldEditCount,
+        normalized_edit_distance: input.normalizedEditDistance,
+      })
+      .eq("id", input.runId);
+    if (error) {
+      throw error;
+    }
   },
 };
 

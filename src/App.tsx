@@ -13,7 +13,7 @@ import {
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { api } from "./data";
-import { useMockBackend } from "./lib/env";
+import { enableCoachLlm, useMockBackend } from "./lib/env";
 import type {
   AdminStats,
   AthletePatch,
@@ -21,11 +21,23 @@ import type {
   CampaignWithMembership,
   ChangeRequestView,
 } from "./data/types";
+import { draftPlayerReminder, summarizeCampaignReadiness } from "./lib/assistant";
 import {
-  draftPlayerReminder,
-  structureCoachNotes,
-  summarizeCampaignReadiness,
-} from "./lib/assistant";
+  buildAccumulatedInput,
+  calculateCoachNoteEditMetrics,
+  coachNoteDraftToFormText,
+  createDeterministicCoachNoteDraft,
+  COACH_NOTE_MAX_TURNS,
+  suggestedAmbiguityOptions,
+  validateCoachNoteDraft,
+  type CoachNoteAction,
+  type CoachNoteClarification,
+  type CoachNoteDraftV1,
+  type CoachNoteFeedback,
+  type CoachNoteGenerationResult,
+  type CoachNoteSection,
+  type EvidenceItem,
+} from "./lib/coachNotes";
 import { getPassportStatus, passportStatusLabel } from "./lib/passport";
 import { getProfileCompletion, getMissingAthleteFields } from "./lib/profile";
 import { getRoleHome } from "./lib/roles";
@@ -35,6 +47,7 @@ import type {
   Campaign,
   CoachAthleteView,
   CoachEvaluation,
+  PriorCoachEvaluation,
   Recommendation,
   Role,
 } from "./types/database";
@@ -153,6 +166,7 @@ function AppLayout() {
     <div className="app-shell">
       <header className="app-header">
         <Link to="/" className="brand">
+          <DiscMark className="brand-disc" />
           SUFA CRM
         </Link>
         <nav className="app-nav" aria-label="Primary">
@@ -307,10 +321,10 @@ function AuthCallbackPage() {
   }, [navigate, profile]);
 
   return (
-    <section className="card">
-      <h1>Completing sign in...</h1>
-      <p className="muted">We are checking your SUFA CRM session.</p>
-    </section>
+    <main className="loading-screen">
+      <DiscMark className="loading-disc" />
+      <p className="muted">Completing sign in to SUFA CRM...</p>
+    </main>
   );
 }
 
@@ -1416,10 +1430,20 @@ function CoachEvaluationPage() {
   const { campaignId = "", playerId = "" } = useParams();
   const { profile } = useAuth();
   const [athlete, setAthlete] = useState<CoachAthleteView | null>(null);
+  const [priorEvaluations, setPriorEvaluations] = useState<PriorCoachEvaluation[]>([]);
   const [form, setForm] = useState<EvaluationFormState>(emptyEvaluationForm);
   const [roughNotes, setRoughNotes] = useState("");
+  const [additionalNotes, setAdditionalNotes] = useState("");
+  const [clarifications, setClarifications] = useState<CoachNoteClarification[]>([]);
+  const [pendingClarifications, setPendingClarifications] = useState<Record<string, string>>({});
+  const [sessionId, setSessionId] = useState<string | undefined>();
+  const [turnCount, setTurnCount] = useState(0);
   const [evaluationId, setEvaluationId] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationResult, setGenerationResult] = useState<CoachNoteGenerationResult | null>(null);
+  const [feedback, setFeedback] = useState<CoachNoteFeedback | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const structuredSectionRef = useRef<HTMLElement | null>(null);
 
@@ -1430,8 +1454,10 @@ function CoachEvaluationPage() {
     void Promise.all([
       api.getCoachAthletes(campaignId),
       api.getEvaluation(campaignId, playerId, profile.id),
-    ]).then(([athletes, evaluation]) => {
+      api.listOwnSubmittedEvaluations(profile.id, playerId, 3),
+    ]).then(([athletes, evaluation, prior]) => {
       setAthlete(athletes.find((row) => row.id === playerId) ?? null);
+      setPriorEvaluations(prior.filter((row) => row.campaignId !== campaignId));
       if (evaluation) {
         setEvaluationId(evaluation.id);
         setForm(evaluationFormFromRow(evaluation));
@@ -1443,16 +1469,24 @@ function CoachEvaluationPage() {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
-  function handleStructureNotes() {
-    const draft = structureCoachNotes(roughNotes);
+  function applyCoachNoteDraft(draft: CoachNoteDraftV1) {
+    const text = coachNoteDraftToFormText(draft);
     setForm((current) => ({
       ...current,
-      strengths: draft.strengths || current.strengths,
-      development_areas: draft.developmentAreas || current.development_areas,
-      overall_notes: draft.overallNotes || current.overall_notes,
-      recommendation: draft.recommendation ?? current.recommendation,
+      strengths: text.strengths || current.strengths,
+      development_areas: text.developmentAreas || current.development_areas,
+      overall_notes: text.overallNotes || current.overall_notes,
     }));
-    setMessage("Notes structured into a draft. Review before saving.");
+  }
+
+  function applyGenerationResult(result: CoachNoteGenerationResult) {
+    applyCoachNoteDraft(result.draft);
+    setGenerationResult(result);
+    setSessionId(result.sessionId);
+    setTurnCount(result.turnIndex + 1);
+  }
+
+  function scrollToStructuredSection() {
     window.requestAnimationFrame(() => {
       const section = structuredSectionRef.current;
       if (typeof section?.scrollIntoView === "function") {
@@ -1460,6 +1494,158 @@ function CoachEvaluationPage() {
       }
       section?.focus();
     });
+  }
+
+  async function runCoachNoteAction(
+    action: CoachNoteAction,
+    options: {
+      nextClarifications?: CoachNoteClarification[];
+      nextAdditionalNotes?: string;
+      section?: CoachNoteSection;
+      sessionId?: string | undefined;
+      successMessage: string;
+    },
+  ) {
+    const activeSessionId = options.sessionId !== undefined ? options.sessionId : sessionId;
+    if (turnCount >= COACH_NOTE_MAX_TURNS && activeSessionId) {
+      setGenerationError("This evaluation copilot session reached its turn limit.");
+      return;
+    }
+
+    const nextClarifications = options.nextClarifications ?? clarifications;
+    const nextAdditionalNotes = options.nextAdditionalNotes ?? additionalNotes;
+
+    if (!enableCoachLlm) {
+      const accumulatedInput = buildAccumulatedInput(
+        roughNotes,
+        nextClarifications,
+        nextAdditionalNotes,
+      );
+      const draft = createDeterministicCoachNoteDraft(accumulatedInput);
+      applyCoachNoteDraft(draft);
+      setClarifications(nextClarifications);
+      setAdditionalNotes(nextAdditionalNotes);
+      setPendingClarifications({});
+      setGenerationResult(null);
+      setGenerationError(null);
+      setFeedback(null);
+      setMessage(`${options.successMessage} Review every field before saving.`);
+      scrollToStructuredSection();
+      return;
+    }
+
+    setGenerating(true);
+    setGenerationError(null);
+    setFeedback(null);
+    try {
+      const result = await api.coachNoteAction({
+        campaignId,
+        athleteId: playerId,
+        roughNotes,
+        action,
+        sessionId: activeSessionId,
+        clarifications: nextClarifications,
+        additionalNotes: nextAdditionalNotes,
+        section: options.section,
+      });
+      const validation = validateCoachNoteDraft(result.draft, result.redactedNotes);
+      if (!validation.valid) {
+        throw new Error("Generated draft failed grounding validation");
+      }
+      applyGenerationResult(result);
+      setClarifications(nextClarifications);
+      setAdditionalNotes(nextAdditionalNotes);
+      setPendingClarifications({});
+      setMessage(options.successMessage);
+    } catch {
+      setGenerationError(
+        "The LLM draft is unavailable. You can retry or explicitly use the deterministic fallback.",
+      );
+      setMessage(null);
+      setGenerating(false);
+      return;
+    }
+    setGenerating(false);
+    scrollToStructuredSection();
+  }
+
+  async function handleStructureNotes() {
+    setSessionId(undefined);
+    setTurnCount(0);
+    setClarifications([]);
+    setAdditionalNotes("");
+    setPendingClarifications({});
+    await runCoachNoteAction("structure", {
+      sessionId: undefined,
+      nextClarifications: [],
+      nextAdditionalNotes: "",
+      successMessage: "Notes structured into a draft. Review before saving.",
+    });
+  }
+
+  async function handleApplyClarifications() {
+    const draftAmbiguities = generationResult?.draft.ambiguities ?? [];
+    const nextClarifications = draftAmbiguities
+      .map((ambiguity) => {
+        const answer = pendingClarifications[ambiguity.sourceQuote]?.trim();
+        if (!answer || answer.startsWith("Skip")) {
+          return null;
+        }
+        return { sourceQuote: ambiguity.sourceQuote, answer };
+      })
+      .filter((value): value is CoachNoteClarification => value !== null);
+    if (nextClarifications.length === 0) {
+      setMessage("Add at least one clarification answer or edit the form directly.");
+      return;
+    }
+    await runCoachNoteAction("clarify", {
+      nextClarifications: [...clarifications, ...nextClarifications],
+      successMessage: "Clarifications applied to the draft. Review before saving.",
+    });
+  }
+
+  async function handleAddMoreNotes() {
+    if (additionalNotes.trim().length === 0) {
+      setMessage("Add more notes before re-structuring.");
+      return;
+    }
+    await runCoachNoteAction("add_notes", {
+      successMessage: "Additional notes structured into the draft. Review before saving.",
+    });
+  }
+
+  async function handleRegenerateSection(section: CoachNoteSection) {
+    await runCoachNoteAction("regenerate_section", {
+      section,
+      successMessage: `Regenerated ${section.replaceAll("_", " ")}. Review before saving.`,
+    });
+  }
+
+  function handleDeterministicFallback() {
+    const accumulatedInput = buildAccumulatedInput(roughNotes, clarifications, additionalNotes);
+    const draft = createDeterministicCoachNoteDraft(accumulatedInput);
+    applyCoachNoteDraft(draft);
+    setGenerationResult(null);
+    setSessionId(undefined);
+    setTurnCount(0);
+    setGenerationError(null);
+    setFeedback(null);
+    setMessage("Deterministic fallback applied. Review every field before saving.");
+  }
+
+  async function handleCoachNoteFeedback(nextFeedback: CoachNoteFeedback) {
+    if (!generationResult) {
+      return;
+    }
+    try {
+      await api.submitCoachNoteFeedback({
+        runId: generationResult.runId,
+        feedback: nextFeedback,
+      });
+      setFeedback(nextFeedback);
+    } catch {
+      setGenerationError("Feedback could not be saved. The evaluation draft is unchanged.");
+    }
   }
 
   async function save(status: "draft" | "submitted") {
@@ -1488,7 +1674,25 @@ function CoachEvaluationPage() {
     });
     setEvaluationId(saved.id);
     setForm(evaluationFormFromRow(saved));
-    setMessage(status === "submitted" ? "Evaluation submitted." : "Evaluation draft saved.");
+    let saveMessage = status === "submitted" ? "Evaluation submitted." : "Evaluation draft saved.";
+    if (generationResult) {
+      const generated = coachNoteDraftToFormText(generationResult.draft);
+      const final = {
+        strengths: form.strengths,
+        developmentAreas: form.development_areas,
+        overallNotes: form.overall_notes,
+      };
+      const metrics = calculateCoachNoteEditMetrics(generated, final);
+      try {
+        await api.recordCoachNoteEditMetrics({
+          runId: generationResult.runId,
+          ...metrics,
+        });
+      } catch {
+        saveMessage = `${saveMessage} Edit metrics could not be recorded.`;
+      }
+    }
+    setMessage(saveMessage);
     setSaving(false);
   }
 
@@ -1517,10 +1721,13 @@ function CoachEvaluationPage() {
           </div>
         </div>
       </section>
+      {priorEvaluations.length > 0 ? (
+        <PriorEvaluationsPanel evaluations={priorEvaluations} />
+      ) : null}
       <section className="card stack">
         <div className="section-title">
-          <h2>Assistant</h2>
-          <Badge>draft only</Badge>
+          <h2>Evaluation copilot</h2>
+          <Badge>{enableCoachLlm ? "LLM draft" : "local draft"}</Badge>
         </div>
         <div className="field">
           <label htmlFor="rough-notes">Paste rough notes</label>
@@ -1534,14 +1741,82 @@ function CoachEvaluationPage() {
         <button
           type="button"
           className="btn primary"
-          onClick={handleStructureNotes}
-          disabled={roughNotes.trim().length === 0}
+          onClick={() => void handleStructureNotes()}
+          disabled={roughNotes.trim().length === 0 || generating}
         >
-          Structure notes
+          {generating ? "Structuring..." : "Structure notes"}
         </button>
+        {generationResult ? (
+          <CoachNoteCopilotPanel
+            draft={generationResult.draft}
+            model={generationResult.model}
+            ambiguityCount={generationResult.ambiguityCount}
+            pendingClarifications={pendingClarifications}
+            onPendingClarificationChange={(sourceQuote, answer) =>
+              setPendingClarifications((current) => ({ ...current, [sourceQuote]: answer }))
+            }
+            onApplyClarifications={() => void handleApplyClarifications()}
+            onRegenerateSection={(section) => void handleRegenerateSection(section)}
+            regenerating={generating}
+          />
+        ) : null}
+        {generationResult || clarifications.length > 0 || additionalNotes.trim().length > 0 ? (
+          <div className="stack">
+            <div className="field">
+              <label htmlFor="additional-notes">Add more notes</label>
+              <textarea
+                id="additional-notes"
+                value={additionalNotes}
+                onChange={(event) => setAdditionalNotes(event.target.value)}
+                placeholder="More detail on defense positioning..."
+              />
+            </div>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void handleAddMoreNotes()}
+              disabled={additionalNotes.trim().length === 0 || generating}
+            >
+              Add notes and re-structure
+            </button>
+          </div>
+        ) : null}
+        {sessionId ? (
+          <p className="muted">
+            Copilot session {sessionId.slice(0, 8)} · turn {turnCount}/{COACH_NOTE_MAX_TURNS}
+          </p>
+        ) : null}
+        {generationError ? (
+          <div className="stack">
+            <p className="alert warn">{generationError}</p>
+            <button type="button" className="btn" onClick={handleDeterministicFallback}>
+              Use deterministic fallback
+            </button>
+          </div>
+        ) : null}
         <p className="muted">
-          The assistant fills draft fields only. The coach must review and save.
+          {enableCoachLlm
+            ? "The copilot structures evidence only. It never sets ratings or recommendations."
+            : "Production LLM drafting is disabled until the Supabase Edge Function is deployed. This uses the local deterministic structurer."}
         </p>
+        {generationResult ? (
+          <div className="stack">
+            <p className="muted">Was this grounded draft useful?</p>
+            <div className="btn-row" aria-label="Coach note feedback">
+              {(["useful", "incorrect", "missing_context"] as const).map((option) => (
+                <button
+                  type="button"
+                  className="btn sm"
+                  key={option}
+                  aria-pressed={feedback === option}
+                  onClick={() => void handleCoachNoteFeedback(option)}
+                >
+                  {option === "missing_context" ? "Missing context" : sentenceCase(option)}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
       <section className="card stack">
         <h2>Ratings</h2>
@@ -1586,13 +1861,9 @@ function CoachEvaluationPage() {
       <section className="card stack" ref={structuredSectionRef} tabIndex={-1}>
         <div className="section-title">
           <h2>Structured evaluation</h2>
-          {message === "Notes structured into a draft. Review before saving." ? (
-            <Badge tone="ok">updated</Badge>
-          ) : null}
+          {message?.includes("Review") ? <Badge tone="ok">updated</Badge> : null}
         </div>
-        {message === "Notes structured into a draft. Review before saving." ? (
-          <p className="alert ok">{message}</p>
-        ) : null}
+        {message?.includes("Review") ? <p className="alert ok">{message}</p> : null}
         <TextAreaField
           label="Strengths"
           value={form.strengths}
@@ -1641,11 +1912,172 @@ function CoachEvaluationPage() {
             Submit evaluation
           </button>
         </div>
-        {message && message !== "Notes structured into a draft. Review before saving." ? (
-          <p className="alert ok">{message}</p>
-        ) : null}
+        {message && !message.includes("Review") ? <p className="alert ok">{message}</p> : null}
       </section>
     </>
+  );
+}
+
+function sentenceCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function PriorEvaluationsPanel({ evaluations }: { evaluations: PriorCoachEvaluation[] }) {
+  return (
+    <section className="card stack prior-eval-panel">
+      <h2>Your prior evaluations for this athlete</h2>
+      <p className="muted">
+        Read-only context from your submitted evaluations. This is not merged into the current draft
+        automatically.
+      </p>
+      {evaluations.map((evaluation) => (
+        <details key={evaluation.id} className="prior-eval-item">
+          <summary>
+            {evaluation.campaignName} · {new Date(evaluation.submittedAt).toLocaleDateString()}
+          </summary>
+          {evaluation.strengths ? (
+            <div>
+              <strong>Strengths</strong>
+              <p>{evaluation.strengths}</p>
+            </div>
+          ) : null}
+          {evaluation.developmentAreas ? (
+            <div>
+              <strong>Development areas</strong>
+              <p>{evaluation.developmentAreas}</p>
+            </div>
+          ) : null}
+          {evaluation.overallNotes ? (
+            <div>
+              <strong>Overall notes</strong>
+              <p>{evaluation.overallNotes}</p>
+            </div>
+          ) : null}
+          {evaluation.recommendation ? (
+            <p className="muted">
+              Recommendation: {evaluation.recommendation.replaceAll("_", " ")}
+            </p>
+          ) : null}
+        </details>
+      ))}
+    </section>
+  );
+}
+
+function CoachNoteCopilotPanel({
+  draft,
+  model,
+  ambiguityCount,
+  pendingClarifications,
+  onPendingClarificationChange,
+  onApplyClarifications,
+  onRegenerateSection,
+  regenerating,
+}: {
+  draft: CoachNoteDraftV1;
+  model: string;
+  ambiguityCount: number;
+  pendingClarifications: Record<string, string>;
+  onPendingClarificationChange: (sourceQuote: string, answer: string) => void;
+  onApplyClarifications: () => void;
+  onRegenerateSection: (section: CoachNoteSection) => void;
+  regenerating: boolean;
+}) {
+  const groups: { label: string; items: EvidenceItem[]; section: CoachNoteSection }[] = [
+    { label: "Strength evidence", items: draft.strengths, section: "strengths" },
+    { label: "Development evidence", items: draft.developmentAreas, section: "development_areas" },
+    {
+      label: "Overall evidence",
+      items: draft.overallObservations,
+      section: "overall_observations",
+    },
+  ];
+  return (
+    <div className="stack">
+      <p className="muted">
+        Generated by {model}. Ambiguities flagged: {ambiguityCount}.
+      </p>
+      <details className="evidence-panel">
+        <summary>Review grounding evidence</summary>
+        {groups.map((group) =>
+          group.items.length > 0 ? (
+            <div key={group.label} className="evidence-group">
+              <div className="section-title">
+                <strong>{group.label}</strong>
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={regenerating}
+                  onClick={() => onRegenerateSection(group.section)}
+                >
+                  Regenerate section
+                </button>
+              </div>
+              {group.items.map((item) => (
+                <div
+                  className="evidence-item"
+                  key={`${group.label}-${item.draftText}-${item.evidenceQuotes.join("|")}`}
+                >
+                  <div>{item.draftText}</div>
+                  <div className="muted">
+                    Evidence: {item.evidenceQuotes.map((quote) => `"${quote}"`).join(", ")} (
+                    {item.confidence})
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null,
+        )}
+      </details>
+      {draft.ambiguities.length > 0 ? (
+        <div className="clarification-panel stack">
+          <strong>Needs coach clarification</strong>
+          <p className="muted">
+            Answer a clarification to re-structure the draft. This is not a chat.
+          </p>
+          {draft.ambiguities.map((ambiguity) => (
+            <div
+              className="clarification-card"
+              key={`${ambiguity.sourceQuote}-${ambiguity.question}`}
+            >
+              <div>{ambiguity.question}</div>
+              <div className="muted">Source: "{ambiguity.sourceQuote}"</div>
+              <div className="btn-row">
+                {suggestedAmbiguityOptions(ambiguity.sourceQuote).map((option) => (
+                  <button
+                    type="button"
+                    className="btn sm"
+                    key={option}
+                    aria-pressed={pendingClarifications[ambiguity.sourceQuote] === option}
+                    onClick={() => onPendingClarificationChange(ambiguity.sourceQuote, option)}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+              <div className="field">
+                <label htmlFor={`clarify-${ambiguity.sourceQuote}`}>Or type a short answer</label>
+                <input
+                  id={`clarify-${ambiguity.sourceQuote}`}
+                  value={pendingClarifications[ambiguity.sourceQuote] ?? ""}
+                  onChange={(event) =>
+                    onPendingClarificationChange(ambiguity.sourceQuote, event.target.value)
+                  }
+                />
+              </div>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="btn"
+            disabled={regenerating}
+            onClick={onApplyClarifications}
+          >
+            Apply clarifications and re-structure
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

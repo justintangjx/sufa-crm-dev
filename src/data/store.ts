@@ -19,6 +19,12 @@ export function getData(): MockData {
     if (raw) {
       try {
         memory = JSON.parse(raw) as MockData;
+        if (!memory.coachNoteSessions) {
+          memory.coachNoteSessions = [];
+        }
+        if (!memory.coachNoteTurns) {
+          memory.coachNoteTurns = [];
+        }
         return memory;
       } catch {
         // fall through to a fresh seed on corrupt data

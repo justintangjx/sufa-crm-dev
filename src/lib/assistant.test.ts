@@ -67,14 +67,14 @@ describe("structureCoachNotes", () => {
     expect(draft.developmentAreas.toLowerCase()).toContain("defense");
   });
 
-  it("detects a not_selected recommendation before selected", () => {
+  it("does not infer a not-selected recommendation", () => {
     const draft = structureCoachNotes("Good athlete but not ready to select this cycle.");
-    expect(draft.recommendation).toBe("not_selected");
+    expect(draft.recommendation).toBeNull();
   });
 
-  it("detects a selected recommendation", () => {
+  it("does not infer a selected recommendation", () => {
     const draft = structureCoachNotes("Reliable starter, lock them in to select.");
-    expect(draft.recommendation).toBe("selected");
+    expect(draft.recommendation).toBeNull();
   });
 
   it("falls back to needs_review and keeps overall notes", () => {

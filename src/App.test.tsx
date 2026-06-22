@@ -156,7 +156,8 @@ describe("App routing", () => {
     expect(screen.getByLabelText(/development areas/i)).toHaveValue(
       "Needs to work on reset defense",
     );
-    expect(screen.getByLabelText(/recommendation/i)).toHaveValue("selected");
+    expect(screen.getByLabelText(/recommendation/i)).toHaveValue("");
+    expect(screen.getByText(/review grounding evidence/i)).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText(/throwing rating/i), "4");
     await user.selectOptions(screen.getByLabelText(/cutting rating/i), "4");
@@ -165,6 +166,7 @@ describe("App routing", () => {
     await user.selectOptions(screen.getByLabelText(/game iq rating/i), "5");
     await user.selectOptions(screen.getByLabelText(/communication rating/i), "4");
     await user.selectOptions(screen.getByLabelText(/coachability rating/i), "5");
+    await user.selectOptions(screen.getByLabelText(/recommendation/i), "selected");
     await user.click(screen.getByRole("button", { name: /submit evaluation/i }));
 
     expect(await screen.findByText(/evaluation submitted/i)).toBeInTheDocument();
@@ -173,5 +175,20 @@ describe("App routing", () => {
     expect(evaluation?.status).toBe("submitted");
     expect(evaluation?.recommendation).toBe("selected");
     expect(evaluation?.strengths).toContain("Strong hucks");
+  });
+
+  it("does not require an LLM call to structure coach notes in the app shell", async () => {
+    const user = userEvent.setup();
+    await api.signIn("coach@sufa.test");
+
+    render(<TestApp initialEntries={["/coach/evaluations/c-sea/a-cara"]} />);
+
+    expect(await screen.findByRole("heading", { name: /cara/i })).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/paste rough notes/i), "Calm handler. Needs more reps.");
+    await user.click(screen.getByRole("button", { name: /structure notes/i }));
+
+    expect(await screen.findByText(/notes structured into a draft/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/strengths/i)).toHaveValue("Calm handler");
+    expect(screen.getByLabelText(/development areas/i)).toHaveValue("Needs more reps");
   });
 });
