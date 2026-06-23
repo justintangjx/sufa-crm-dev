@@ -211,7 +211,10 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
           content:
             "You structure coach notes into evidence-grounded JSON. You never make ratings or selection decisions.",
         },
-        { role: "user", content: buildCoachNotePrompt(notes, repairErrors, options) },
+        { role: "user", content: buildCoachNotePrompt(notes, repairErrors, {
+          ...options,
+          includeSchema: profile.format === "json_object",
+        }) },
       ],
     };
 

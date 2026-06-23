@@ -10,7 +10,7 @@ Ambiguities: vague, contradictory, decision-oriented, or underspecified phrases 
 export function buildCoachNotePrompt(
   notes: string,
   repairErrors: string[] = [],
-  options: { section?: string; action?: string } = {},
+  options: { section?: string; action?: string; includeSchema?: boolean } = {},
 ): string {
   const repair =
     repairErrors.length === 0
@@ -26,6 +26,30 @@ export function buildCoachNotePrompt(
           : "";
   const sectionHint = options.section
     ? `\nPrioritize evidence for the ${options.section} category in this turn.\n`
+    : "";
+  const schemaHint = options.includeSchema
+    ? `
+Required JSON shape (use camelCase keys exactly):
+{
+  "schemaVersion": 1,
+  "strengths": [
+    {
+      "draftText": "concise strength",
+      "evidenceQuotes": ["exact substring from SOURCE_NOTES"],
+      "confidence": "high"
+    }
+  ],
+  "developmentAreas": [],
+  "overallObservations": [],
+  "ambiguities": [
+    {
+      "sourceQuote": "exact substring from SOURCE_NOTES",
+      "question": "clarifying question for the coach"
+    }
+  ]
+}
+confidence must be one of: "high", "medium", "low".
+`
     : "";
   return `
 Prompt version: ${PROMPT_VERSION}
@@ -57,7 +81,7 @@ Strength evidence: "Calm with the disc"
 SOURCE_NOTES: "Reliable resets. Selected for the squad."
 Strength evidence: "Reliable resets"
 Ambiguity source: "Selected for the squad"
-${repair}
+${schemaHint}${repair}
 SOURCE_NOTES:
 ${notes}
 `.trim();

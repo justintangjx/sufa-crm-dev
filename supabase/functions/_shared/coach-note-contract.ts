@@ -4,6 +4,7 @@ export {
   COACH_NOTE_MAX_TURNS,
   buildAccumulatedInput,
   coachNoteJsonSchema,
+  normalizeCoachNoteDraft,
   validateCoachNoteDraftErrors,
   type CoachNoteAction,
   type CoachNoteAmbiguity,

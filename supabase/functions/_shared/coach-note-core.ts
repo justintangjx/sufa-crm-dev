@@ -176,6 +176,158 @@ export function validateCoachNoteDraftErrors(value: unknown, sourceNotes: string
   return errors;
 }
 
+function normalizeConfidence(value: unknown): CoachNoteConfidence {
+  if (typeof value === "string") {
+    const lower = value.trim().toLowerCase();
+    if (lower === "high" || lower === "medium" || lower === "low") {
+      return lower;
+    }
+  }
+  return "medium";
+}
+
+function findGroundedQuote(text: string, sourceNotes: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (sourceNotes.includes(trimmed)) {
+    return trimmed;
+  }
+  const sentences = sourceNotes.split(/(?<=[.!?])\s+/);
+  for (const sentence of sentences) {
+    const candidate = sentence.trim();
+    if (candidate && (candidate.includes(trimmed) || trimmed.includes(candidate))) {
+      if (sourceNotes.includes(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+function normalizeEvidenceItem(item: unknown, sourceNotes: string): EvidenceItem | null {
+  if (typeof item === "string") {
+    const quote = findGroundedQuote(item, sourceNotes);
+    if (!quote) {
+      return null;
+    }
+    return {
+      draftText: quote,
+      evidenceQuotes: [quote],
+      confidence: "medium",
+    };
+  }
+  if (!isRecord(item)) {
+    return null;
+  }
+  const draftTextRaw =
+    item.draftText ?? item.draft_text ?? item.text ?? item.summary ?? item.observation;
+  const quotesRaw = item.evidenceQuotes ?? item.evidence_quotes ?? item.quotes ?? item.evidence;
+  let draftText = typeof draftTextRaw === "string" ? draftTextRaw.trim() : "";
+  let evidenceQuotes = Array.isArray(quotesRaw)
+    ? quotesRaw.filter((quote): quote is string => typeof quote === "string" && quote.trim().length > 0)
+    : [];
+  if (!draftText && evidenceQuotes.length > 0) {
+    draftText = evidenceQuotes[0]!.trim();
+  }
+  if (draftText && evidenceQuotes.length === 0) {
+    const grounded = findGroundedQuote(draftText, sourceNotes);
+    if (grounded) {
+      evidenceQuotes = [grounded];
+      draftText = grounded;
+    }
+  }
+  if (!draftText || evidenceQuotes.length === 0) {
+    return null;
+  }
+  return {
+    draftText,
+    evidenceQuotes,
+    confidence: normalizeConfidence(item.confidence),
+  };
+}
+
+function normalizeEvidenceArray(value: unknown, sourceNotes: string): EvidenceItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => normalizeEvidenceItem(item, sourceNotes))
+    .filter((item): item is EvidenceItem => item !== null);
+}
+
+function normalizeAmbiguity(item: unknown, sourceNotes: string): CoachNoteAmbiguity | null {
+  if (!isRecord(item)) {
+    if (typeof item === "string") {
+      const quote = findGroundedQuote(item, sourceNotes);
+      if (!quote) {
+        return null;
+      }
+      return {
+        sourceQuote: quote,
+        question: `What did you mean by "${quote}"?`,
+      };
+    }
+    return null;
+  }
+  const sourceQuoteRaw = item.sourceQuote ?? item.source_quote ?? item.quote ?? item.text;
+  const questionRaw = item.question ?? item.clarification ?? item.prompt;
+  const sourceQuote =
+    typeof sourceQuoteRaw === "string" ? findGroundedQuote(sourceQuoteRaw, sourceNotes) : null;
+  const question = typeof questionRaw === "string" ? questionRaw.trim() : "";
+  if (!sourceQuote) {
+    return null;
+  }
+  return {
+    sourceQuote,
+    question: question || `What did you mean by "${sourceQuote}"?`,
+  };
+}
+
+function normalizeAmbiguityArray(value: unknown, sourceNotes: string): CoachNoteAmbiguity[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => normalizeAmbiguity(item, sourceNotes))
+    .filter((item): item is CoachNoteAmbiguity => item !== null);
+}
+
+function coerceSchemaVersion(value: unknown): number {
+  if (value === SCHEMA_VERSION || value === String(SCHEMA_VERSION)) {
+    return SCHEMA_VERSION;
+  }
+  const parsed = Number(value);
+  return parsed === SCHEMA_VERSION ? SCHEMA_VERSION : SCHEMA_VERSION;
+}
+
+export function normalizeCoachNoteDraft(value: unknown, sourceNotes: string): CoachNoteDraft {
+  if (!isRecord(value)) {
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      strengths: [],
+      developmentAreas: [],
+      overallObservations: [],
+      ambiguities: [],
+    };
+  }
+
+  return {
+    schemaVersion: coerceSchemaVersion(value.schemaVersion ?? value.schema_version),
+    strengths: normalizeEvidenceArray(value.strengths ?? value.strength, sourceNotes),
+    developmentAreas: normalizeEvidenceArray(
+      value.developmentAreas ?? value.development_areas ?? value.development,
+      sourceNotes,
+    ),
+    overallObservations: normalizeEvidenceArray(
+      value.overallObservations ?? value.overall_observations ?? value.overall,
+      sourceNotes,
+    ),
+    ambiguities: normalizeAmbiguityArray(value.ambiguities ?? value.ambiguity, sourceNotes),
+  };
+}
+
 export const coachNoteJsonSchema = {
   type: "object",
   additionalProperties: false,

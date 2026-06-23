@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.108.0";
 import {
   PROMPT_VERSION,
   SCHEMA_VERSION,
+  normalizeCoachNoteDraft,
   validateDraft,
   type CoachNoteDraft,
 } from "../_shared/coach-note-contract.ts";
@@ -242,19 +243,26 @@ Deno.serve(async (request) => {
   let errorCode: string | null = null;
 
   async function generateValidated(attempt: number): Promise<void> {
-    const generated = await provider.generate(
-      redactedNotes,
-      validationErrors,
-      providerTimeoutMs(),
-      { section, action },
-    );
-    draft = generated.draft;
-    inputTokens = (inputTokens ?? 0) + (generated.usage.inputTokens ?? 0);
-    outputTokens = (outputTokens ?? 0) + (generated.usage.outputTokens ?? 0);
-    validationErrors = validateDraft(draft, redactedNotes);
-    if (validationErrors.length > 0 && attempt === 0) {
-      repairCount = 1;
-      await generateValidated(1);
+    try {
+      const generated = await provider.generate(
+        redactedNotes,
+        validationErrors,
+        providerTimeoutMs(),
+        { section, action },
+      );
+      draft = normalizeCoachNoteDraft(generated.draft, redactedNotes);
+      inputTokens = (inputTokens ?? 0) + (generated.usage.inputTokens ?? 0);
+      outputTokens = (outputTokens ?? 0) + (generated.usage.outputTokens ?? 0);
+      validationErrors = validateDraft(draft, redactedNotes);
+      if (validationErrors.length > 0 && attempt === 0) {
+        repairCount = 1;
+        await generateValidated(1);
+      }
+    } catch (error) {
+      if (attempt === 1 && draft !== null && validationErrors.length > 0) {
+        throw new Error("output_validation_failed");
+      }
+      throw error;
     }
   }
 

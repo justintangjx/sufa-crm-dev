@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAccumulatedInput,
   COACH_NOTE_MAX_TURNS,
+  normalizeCoachNoteDraft,
   PROMPT_VERSION,
   SCHEMA_VERSION,
   validateCoachNoteDraftErrors,
@@ -30,5 +31,27 @@ describe("coach note core (synced copy)", () => {
     };
     expect(validateCoachNoteDraftErrors(draft, notes)).toEqual([]);
     expect(accumulated).toContain("Coach clarifications");
+  });
+
+  it("normalizes snake_case and string-list provider output", () => {
+    const notes =
+      "Strong hucks on the break side. Reset defense is loose under pressure. Coach note says selected for the squad.";
+    const normalized = normalizeCoachNoteDraft(
+      {
+        schema_version: "1",
+        strengths: ["Strong hucks on the break side"],
+        development_areas: ["Reset defense is loose under pressure"],
+        overall_observations: [],
+        ambiguities: [
+          {
+            source_quote: "selected for the squad",
+            question: "",
+          },
+        ],
+      },
+      notes,
+    );
+    expect(normalized.schemaVersion).toBe(1);
+    expect(validateCoachNoteDraftErrors(normalized, notes)).toEqual([]);
   });
 });
