@@ -122,23 +122,49 @@ Deno.serve(async (request) => {
     return json(400, { error: "invalid_request" });
   }
 
-  const [{ data: profile }, { data: assignment }, { data: athlete }] = await Promise.all([
-    authenticated.from("profiles").select("role").eq("id", user.id).maybeSingle(),
-    authenticated
+  const [
+    { data: profile, error: profileError },
+    { data: assignment, error: assignmentError },
+    { data: membership, error: membershipError },
+  ] = await Promise.all([
+    service.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+    service
       .from("campaign_coaches")
       .select("id")
       .eq("campaign_id", campaignId)
       .eq("coach_profile_id", user.id)
       .maybeSingle(),
-    authenticated
-      .from("coach_athlete_view")
-      .select("id, legal_name, preferred_name")
+    service
+      .from("campaign_members")
+      .select("athlete_id")
       .eq("campaign_id", campaignId)
-      .eq("id", athleteId)
+      .eq("athlete_id", athleteId)
       .maybeSingle(),
   ]);
-  if (profile?.role !== "coach" || !assignment || !athlete) {
-    return json(403, { error: "coach_assignment_required" });
+
+  if (profileError || assignmentError || membershipError) {
+    return json(500, { error: "assignment_lookup_failed" });
+  }
+  if (profile?.role !== "coach") {
+    return json(403, { error: "coach_role_required" });
+  }
+  if (!assignment) {
+    return json(403, { error: "coach_campaign_assignment_required" });
+  }
+  if (!membership) {
+    return json(403, { error: "athlete_not_in_campaign" });
+  }
+
+  const { data: athlete, error: athleteError } = await service
+    .from("athletes")
+    .select("id, legal_name, preferred_name")
+    .eq("id", athleteId)
+    .maybeSingle();
+  if (athleteError) {
+    return json(500, { error: "assignment_lookup_failed" });
+  }
+  if (!athlete) {
+    return json(403, { error: "athlete_not_found" });
   }
 
   const accumulatedInput = buildAccumulatedInput(roughNotes, clarifications, additionalNotes);
