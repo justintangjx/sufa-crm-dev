@@ -17,7 +17,7 @@ export interface CoachNoteGenerator {
   generate(
     notes: string,
     repairErrors: string[],
-    signal: AbortSignal,
+    timeoutMs: number,
     options?: { section?: string; action?: string },
   ): Promise<ProviderResult>;
 }
@@ -149,18 +149,28 @@ function parseProviderDraft(message: ChatCompletionMessage | undefined): CoachNo
   throw new Error("provider_json_parse_failed");
 }
 
-function requestProfiles(apiUrl: string): RequestProfile[] {
-  const profiles: RequestProfile[] = [
-    { format: "json_schema" },
-    { format: "json_object" },
-  ];
-  if (!isOpenRouterApi(apiUrl)) {
-    return profiles;
+function isReasoningOrFreeModel(model: string): boolean {
+  const normalized = model.toLowerCase();
+  return normalized.includes("gpt-oss") || normalized.includes(":free");
+}
+
+function requestProfiles(apiUrl: string, model: string): RequestProfile[] {
+  if (isOpenRouterApi(apiUrl) && isReasoningOrFreeModel(model)) {
+    // One call with a full timeout budget. Free reasoning models need ~25s+ and often
+    // return prose in `reasoning`; json_object + include_reasoning=false is the stable path.
+    return [{ format: "json_object", includeReasoning: false, responseHealing: true }];
   }
+
+  if (isOpenRouterApi(apiUrl)) {
+    return [
+      { format: "json_schema" },
+      { format: "json_object", includeReasoning: false, responseHealing: true },
+    ];
+  }
+
   return [
     { format: "json_schema" },
-    { format: "json_schema", includeReasoning: false },
-    { format: "json_object", includeReasoning: false, responseHealing: true },
+    { format: "json_object" },
   ];
 }
 
@@ -172,7 +182,8 @@ function isRetryableProviderError(error: unknown): boolean {
     error.message === "provider_json_parse_failed" ||
     error.message === "provider_empty_response" ||
     error.message === "provider_http_400" ||
-    error.message === "provider_http_422"
+    error.message === "provider_http_422" ||
+    error.message === "provider_timeout"
   );
 }
 
@@ -230,7 +241,7 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
   private async requestOnce(
     notes: string,
     repairErrors: string[],
-    signal: AbortSignal,
+    timeoutMs: number,
     options: { section?: string; action?: string },
     profile: RequestProfile,
   ): Promise<ProviderResult> {
@@ -241,7 +252,7 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(this.buildRequestBody(notes, repairErrors, options, profile)),
-      signal,
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
@@ -271,20 +282,28 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
   async generate(
     notes: string,
     repairErrors: string[],
-    signal: AbortSignal,
+    timeoutMs: number,
     options: { section?: string; action?: string } = {},
   ): Promise<ProviderResult> {
-    const profiles = requestProfiles(this.apiUrl);
+    const profiles = requestProfiles(this.apiUrl, this.model);
     let lastError: unknown = new Error("provider_json_parse_failed");
 
     for (const profile of profiles) {
       try {
-        return await this.requestOnce(notes, repairErrors, signal, options, profile);
+        return await this.requestOnce(notes, repairErrors, timeoutMs, options, profile);
       } catch (error) {
         lastError = error;
         if (!isRetryableProviderError(error) || profile === profiles[profiles.length - 1]) {
           throw error;
         }
+        console.error(
+          "provider_profile_retry",
+          JSON.stringify({
+            model: this.model,
+            profile,
+            error: error instanceof Error ? error.message : "unknown",
+          }),
+        );
       }
     }
 

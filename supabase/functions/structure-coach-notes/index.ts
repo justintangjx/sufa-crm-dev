@@ -74,9 +74,9 @@ function countAmbiguities(draft: CoachNoteDraft): number {
 }
 
 function providerTimeoutMs(): number {
-  const configured = Number(Deno.env.get("COACH_NOTE_PROVIDER_TIMEOUT_MS") ?? "30000");
+  const configured = Number(Deno.env.get("COACH_NOTE_PROVIDER_TIMEOUT_MS") ?? "60000");
   if (!Number.isFinite(configured) || configured < 5_000) {
-    return 30_000;
+    return 60_000;
   }
   return Math.min(configured, 120_000);
 }
@@ -241,15 +241,11 @@ Deno.serve(async (request) => {
   let outputTokens: number | null = null;
   let errorCode: string | null = null;
 
-  async function generateValidated(attempt: number, deadline: number): Promise<void> {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      throw new DOMException("Generation timed out", "TimeoutError");
-    }
+  async function generateValidated(attempt: number): Promise<void> {
     const generated = await provider.generate(
       redactedNotes,
       validationErrors,
-      AbortSignal.timeout(remaining),
+      providerTimeoutMs(),
       { section, action },
     );
     draft = generated.draft;
@@ -258,13 +254,12 @@ Deno.serve(async (request) => {
     validationErrors = validateDraft(draft, redactedNotes);
     if (validationErrors.length > 0 && attempt === 0) {
       repairCount = 1;
-      await generateValidated(1, deadline);
+      await generateValidated(1);
     }
   }
 
   try {
-    const generationDeadline = Date.now() + providerTimeoutMs();
-    await generateValidated(0, generationDeadline);
+    await generateValidated(0);
     if (!draft || validationErrors.length > 0) {
       throw new Error("output_validation_failed");
     }
