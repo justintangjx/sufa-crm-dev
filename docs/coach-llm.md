@@ -129,6 +129,11 @@ COACH_NOTE_INPUT_COST_PER_MILLION
 COACH_NOTE_OUTPUT_COST_PER_MILLION
 ```
 
+For OpenRouter, prefer a non-reasoning model for demos (for example `openai/gpt-4o-mini`).
+Free reasoning models such as `openai/gpt-oss-120b:free` may return chain-of-thought in
+`reasoning` instead of JSON in `content` unless `include_reasoning=false` is set (the Edge
+Function sets this automatically for OpenRouter URLs).
+
 Do not expose them as `VITE_*` variables.
 
 ## Prompt Design

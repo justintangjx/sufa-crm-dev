@@ -22,9 +22,16 @@ export interface CoachNoteGenerator {
   ): Promise<ProviderResult>;
 }
 
+interface ReasoningDetail {
+  type?: string;
+  text?: string;
+  summary?: string;
+}
+
 interface ChatCompletionMessage {
   content?: string | Record<string, unknown> | null;
   reasoning?: string | null;
+  reasoning_details?: ReasoningDetail[];
 }
 
 interface ChatCompletionResponse {
@@ -32,8 +39,14 @@ interface ChatCompletionResponse {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
+type ResponseFormatMode = "json_schema" | "json_object";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOpenRouterApi(apiUrl: string): boolean {
+  return apiUrl.includes("openrouter.ai");
 }
 
 function stripCodeFence(text: string): string {
@@ -80,6 +93,25 @@ function parseJsonDraft(text: string): CoachNoteDraft {
   }
 }
 
+function collectMessageText(message: ChatCompletionMessage): string[] {
+  const sources: string[] = [];
+  if (typeof message.content === "string" && message.content.trim().length > 0) {
+    sources.push(message.content);
+  }
+  if (typeof message.reasoning === "string" && message.reasoning.trim().length > 0) {
+    sources.push(message.reasoning);
+  }
+  for (const detail of message.reasoning_details ?? []) {
+    if (typeof detail.text === "string" && detail.text.trim().length > 0) {
+      sources.push(detail.text);
+    }
+    if (typeof detail.summary === "string" && detail.summary.trim().length > 0) {
+      sources.push(detail.summary);
+    }
+  }
+  return sources;
+}
+
 function parseProviderDraft(message: ChatCompletionMessage | undefined): CoachNoteDraft {
   if (!message) {
     throw new Error("provider_empty_response");
@@ -89,11 +121,7 @@ function parseProviderDraft(message: ChatCompletionMessage | undefined): CoachNo
     return message.content as CoachNoteDraft;
   }
 
-  const textSources = [message.content, message.reasoning].filter(
-    (value): value is string => typeof value === "string" && value.trim().length > 0,
-  );
-
-  for (const source of textSources) {
+  for (const source of collectMessageText(message)) {
     try {
       return parseJsonDraft(source);
     } catch (error) {
@@ -104,6 +132,14 @@ function parseProviderDraft(message: ChatCompletionMessage | undefined): CoachNo
     }
   }
 
+  console.error(
+    "provider_json_parse_failed",
+    JSON.stringify({
+      hasContent: typeof message.content === "string" ? message.content.slice(0, 120) : message.content,
+      hasReasoning: typeof message.reasoning === "string" ? message.reasoning.slice(0, 120) : null,
+      reasoningDetailCount: message.reasoning_details?.length ?? 0,
+    }),
+  );
   throw new Error("provider_json_parse_failed");
 }
 
@@ -116,11 +152,55 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
     private readonly apiKey: string,
   ) {}
 
-  async generate(
+  private buildRequestBody(
+    notes: string,
+    repairErrors: string[],
+    options: { section?: string; action?: string },
+    format: ResponseFormatMode,
+  ): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      temperature: 0,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You structure coach notes into evidence-grounded JSON. You never make ratings or selection decisions.",
+        },
+        { role: "user", content: buildCoachNotePrompt(notes, repairErrors, options) },
+      ],
+    };
+
+    if (format === "json_schema") {
+      body.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: "coach_note_draft_v1",
+          strict: true,
+          schema: coachNoteJsonSchema,
+        },
+      };
+    } else {
+      body.response_format = { type: "json_object" };
+    }
+
+    if (isOpenRouterApi(this.apiUrl)) {
+      // Reasoning models (e.g. gpt-oss-120b:free) otherwise return prose in `reasoning`
+      // with empty/non-JSON `content`, which breaks structured coach-note parsing.
+      body.include_reasoning = false;
+      body.reasoning = { effort: "none", exclude: true };
+      body.plugins = [{ id: "response-healing" }];
+    }
+
+    return body;
+  }
+
+  private async requestOnce(
     notes: string,
     repairErrors: string[],
     signal: AbortSignal,
-    options: { section?: string; action?: string } = {},
+    options: { section?: string; action?: string },
+    format: ResponseFormatMode,
   ): Promise<ProviderResult> {
     const response = await fetch(this.apiUrl, {
       method: "POST",
@@ -128,26 +208,7 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: this.model,
-        temperature: 0,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You structure coach notes into evidence-grounded JSON. You never make ratings or selection decisions.",
-          },
-          { role: "user", content: buildCoachNotePrompt(notes, repairErrors, options) },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "coach_note_draft_v1",
-            strict: true,
-            schema: coachNoteJsonSchema,
-          },
-        },
-      }),
+      body: JSON.stringify(this.buildRequestBody(notes, repairErrors, options, format)),
       signal,
     });
 
@@ -163,5 +224,32 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
         outputTokens: body.usage?.completion_tokens ?? null,
       },
     };
+  }
+
+  async generate(
+    notes: string,
+    repairErrors: string[],
+    signal: AbortSignal,
+    options: { section?: string; action?: string } = {},
+  ): Promise<ProviderResult> {
+    const formats: ResponseFormatMode[] = ["json_schema", "json_object"];
+    let lastError: unknown = new Error("provider_json_parse_failed");
+
+    for (const format of formats) {
+      try {
+        return await this.requestOnce(notes, repairErrors, signal, options, format);
+      } catch (error) {
+        lastError = error;
+        const retryable =
+          error instanceof Error &&
+          (error.message === "provider_json_parse_failed" ||
+            error.message === "provider_empty_response");
+        if (!retryable || format === "json_object") {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
   }
 }
