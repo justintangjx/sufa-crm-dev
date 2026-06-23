@@ -11,6 +11,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
+import heroImage from "./assets/hero.png";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { api } from "./data";
 import { demoCoachLlm, enableCoachLlm, useMockBackend } from "./lib/env";
@@ -94,11 +95,25 @@ function LoadingPage() {
   );
 }
 
-function PageHead({ title, subtitle }: { title: string; subtitle?: string }) {
+function PageHead({
+  title,
+  subtitle,
+  eyebrow,
+  actions,
+}: {
+  title: string;
+  subtitle?: string;
+  eyebrow?: string;
+  actions?: ReactNode;
+}) {
   return (
     <div className="page-head">
-      <h1>{title}</h1>
-      {subtitle ? <p>{subtitle}</p> : null}
+      <div>
+        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
+        <h1>{title}</h1>
+        {subtitle ? <p>{subtitle}</p> : null}
+      </div>
+      {actions ? <div className="page-actions">{actions}</div> : null}
     </div>
   );
 }
@@ -111,6 +126,26 @@ function Badge({
   tone?: "accent" | "danger" | "ok" | "warn";
 }) {
   return <span className={`badge ${tone}`}>{children}</span>;
+}
+
+function StatCard({
+  label,
+  value,
+  detail,
+  tone = "neutral",
+}: {
+  label: string;
+  value: ReactNode;
+  detail?: string;
+  tone?: "accent" | "danger" | "neutral" | "ok" | "warn";
+}) {
+  return (
+    <section className={`card stat stat-card ${tone}`}>
+      <div className="stat-value">{value}</div>
+      <div className="stat-label">{label}</div>
+      {detail ? <p className="muted">{detail}</p> : null}
+    </section>
+  );
 }
 
 function RootRedirect() {
@@ -175,7 +210,7 @@ function AppLayout() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${profile ? `role-${profile.role}` : ""}`}>
       <header className="app-header">
         <Link to="/" className="brand">
           <DiscMark className="brand-disc" />
@@ -190,6 +225,7 @@ function AppLayout() {
         </nav>
         {profile ? (
           <div className="app-user">
+            <Badge>{sentenceCase(profile.role)}</Badge>
             <span>{profile.email}</span>
             <button type="button" className="btn sm" onClick={() => void handleSignOut()}>
               Sign out
@@ -250,15 +286,23 @@ function LoginPage() {
     <div className="auth-screen">
       <aside className="auth-brand">
         <div className="auth-brand-inner">
-          <div className="auth-logo">
-            <DiscMark />
-          </div>
           <p className="auth-wordmark">SUFA CRM</p>
           <h1>Every roster, tournament-ready.</h1>
           <p className="auth-sub">
             Player profiles, travel documents, and coach evaluations for Singapore Ultimate
-            campaigns &mdash; from SEA Games to Worlds.
+            campaigns - from SEA Games to Worlds.
           </p>
+          <div className="auth-visual" aria-hidden="true">
+            <img src={heroImage} alt="" />
+            <div className="auth-visual-panel top">
+              <span>SEA Games 2026</span>
+              <strong>2/3 profile-ready</strong>
+            </div>
+            <div className="auth-visual-panel bottom">
+              <span>Coach notes</span>
+              <strong>Structured for review</strong>
+            </div>
+          </div>
           <ul className="auth-points">
             <li>
               <span>Players</span> keep profiles and travel documents up to date.
@@ -318,7 +362,7 @@ function LoginPage() {
               </div>
             ) : null}
           </section>
-          <p className="auth-footnote">SUFA &middot; Singapore Ultimate &mdash; internal demo</p>
+          <p className="auth-footnote">SUFA &middot; Singapore Ultimate - internal demo</p>
         </div>
       </main>
     </div>
@@ -373,6 +417,12 @@ function PlayerDashboard() {
       <PageHead
         title="Player Dashboard"
         subtitle="Your profile checklist and campaign readiness."
+        eyebrow="Player workspace"
+        actions={
+          <Link className="btn primary" to="/player/profile">
+            Update profile
+          </Link>
+        }
       />
       <div className="grid cols-2">
         <section className="card stack">
@@ -392,11 +442,11 @@ function PlayerDashboard() {
           ) : (
             <p>Your required profile details are complete.</p>
           )}
-          <Link className="btn primary" to="/player/profile">
+          <Link className="btn" to="/player/profile">
             Complete missing details
           </Link>
         </section>
-        <section className="card stack">
+        <section className="card stack assistant-card">
           <h2>Assistant</h2>
           <p>
             {athlete
@@ -758,26 +808,37 @@ function AdminDashboard() {
   }, []);
 
   const items = [
-    ["Total athletes", stats?.totalAthletes ?? 0],
-    ["Active campaigns", stats?.activeCampaigns ?? 0],
-    ["Incomplete profiles", stats?.incompleteProfiles ?? 0],
-    ["Passport expiring soon", stats?.passportExpiringSoon ?? 0],
-    ["Pending evaluations", stats?.pendingEvaluations ?? 0],
-    ["Pending review items", stats?.pendingReviewItems ?? 0],
+    ["Total athletes", stats?.totalAthletes ?? 0, "neutral", "Across the CRM"],
+    ["Active campaigns", stats?.activeCampaigns ?? 0, "accent", "Currently in motion"],
+    ["Incomplete profiles", stats?.incompleteProfiles ?? 0, "warn", "Need player follow-up"],
+    ["Passport expiring soon", stats?.passportExpiringSoon ?? 0, "danger", "Travel attention"],
+    ["Pending evaluations", stats?.pendingEvaluations ?? 0, "warn", "Coach input outstanding"],
+    ["Pending review items", stats?.pendingReviewItems ?? 0, "accent", "Admin triage queue"],
   ] as const;
 
   return (
     <>
-      <PageHead title="Admin Dashboard" subtitle="Operational overview for campaign readiness." />
+      <PageHead
+        title="Admin Dashboard"
+        subtitle="Operational overview for campaign readiness."
+        eyebrow="Admin command center"
+        actions={
+          <>
+            <Link className="btn" to="/admin/review">
+              Review queue
+            </Link>
+            <Link className="btn primary" to="/admin/campaigns">
+              Campaigns
+            </Link>
+          </>
+        }
+      />
       <div className="grid cols-3">
-        {items.map(([label, value]) => (
-          <section className="card stat" key={label}>
-            <div className="stat-value">{value}</div>
-            <div className="stat-label">{label}</div>
-          </section>
+        {items.map(([label, value, tone, detail]) => (
+          <StatCard key={label} label={label} value={value} tone={tone} detail={detail} />
         ))}
       </div>
-      <section className="card stack">
+      <section className="card stack assistant-card">
         <h2>Assistant</h2>
         <p className="note-box">
           Who is incomplete? Start with the players table and campaign readiness view.
@@ -796,7 +857,11 @@ function AdminPlayersPage() {
 
   return (
     <>
-      <PageHead title="Players" subtitle="Athlete database with readiness signals." />
+      <PageHead
+        title="Players"
+        subtitle="Athlete database with readiness signals."
+        eyebrow="Admin"
+      />
       <section className="card table-wrap">
         <table className="data">
           <thead>
@@ -838,7 +903,11 @@ function AdminCampaignsPage() {
 
   return (
     <>
-      <PageHead title="Campaigns" subtitle="Campaign list and creation workspace." />
+      <PageHead
+        title="Campaigns"
+        subtitle="Campaign list and creation workspace."
+        eyebrow="Admin"
+      />
       <section className="card table-wrap">
         <table className="data">
           <thead>
@@ -970,13 +1039,14 @@ function AdminCampaignDetailPage() {
     <>
       <PageHead
         title={campaign?.name ?? "Campaign"}
+        eyebrow="Campaign readiness"
         subtitle={
           campaign
             ? `${campaign.team ?? "Team"} - ${campaign.location ?? "Location TBC"}`
             : "Campaign readiness"
         }
       />
-      <section className="card stack">
+      <section className="card stack summary-card">
         <div className="section-title">
           <h2>Readiness summary</h2>
           <Badge tone={incompleteRows.length === 0 ? "ok" : "warn"}>
@@ -1004,7 +1074,7 @@ function AdminCampaignDetailPage() {
         </div>
         {message ? <p className="alert ok">{message}</p> : null}
       </section>
-      <section className="card stack">
+      <section className="card stack assistant-card">
         <div className="section-title">
           <h2>Assistant</h2>
           <Badge>guided</Badge>
@@ -1163,8 +1233,8 @@ function AdminReviewPage() {
 
   return (
     <>
-      <PageHead title="Review Queue" subtitle="Player-submitted profile changes." />
-      <section className="card stack">
+      <PageHead title="Review Queue" subtitle="Player-submitted profile changes." eyebrow="Admin" />
+      <section className="card stack assistant-card">
         <div className="section-title">
           <h2>Assistant</h2>
           <Badge>triage</Badge>
@@ -1347,7 +1417,7 @@ function suggestReviewDecisions(requests: readonly ChangeRequestView[]): string 
 function AdminExportsPage() {
   return (
     <>
-      <PageHead title="Exports" subtitle="CSV export workspace." />
+      <PageHead title="Exports" subtitle="CSV export workspace." eyebrow="Admin" />
       <section className="card stack">
         <h2>Available exports</h2>
         <ul>
@@ -1381,16 +1451,31 @@ function CoachDashboard() {
 
   return (
     <>
-      <PageHead title="Coach Dashboard" subtitle="Assigned campaigns and evaluation progress." />
+      <PageHead
+        title="Coach Dashboard"
+        subtitle="Assigned campaigns and evaluation progress."
+        eyebrow="Coach workspace"
+        actions={
+          campaigns[0] ? (
+            <Link className="btn primary" to={`/coach/campaigns/${campaigns[0].id}`}>
+              Open campaign
+            </Link>
+          ) : null
+        }
+      />
       <div className="grid cols-2">
-        <section className="card stat">
-          <div className="stat-value">{campaigns.length}</div>
-          <div className="stat-label">Assigned campaigns</div>
-        </section>
-        <section className="card stat">
-          <div className="stat-value">{evaluations.filter((e) => e.status === "draft").length}</div>
-          <div className="stat-label">Draft evaluations</div>
-        </section>
+        <StatCard
+          label="Assigned campaigns"
+          value={campaigns.length}
+          tone="accent"
+          detail="Coach-safe campaign access"
+        />
+        <StatCard
+          label="Draft evaluations"
+          value={evaluations.filter((e) => e.status === "draft").length}
+          tone="warn"
+          detail="Saved but not submitted"
+        />
       </div>
       <section className="card stack">
         <h2>Campaigns</h2>
@@ -1414,7 +1499,11 @@ function CoachCampaignPage() {
 
   return (
     <>
-      <PageHead title="Assigned Players" subtitle="Coach-safe player list for this campaign." />
+      <PageHead
+        title="Assigned Players"
+        subtitle="Coach-safe player list for this campaign."
+        eyebrow="Coach"
+      />
       <section className="card table-wrap">
         <table className="data">
           <thead>
@@ -1706,7 +1795,11 @@ function CoachEvaluationPage() {
 
   return (
     <>
-      <PageHead title="Evaluation" subtitle="Structure coach notes before saving." />
+      <PageHead
+        title="Evaluation"
+        subtitle="Structure coach notes before saving."
+        eyebrow="Coach"
+      />
       <section className="card stack">
         <div className="section-title">
           <h2>{athleteName}</h2>
