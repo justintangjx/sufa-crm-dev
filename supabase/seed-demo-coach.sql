@@ -2,7 +2,7 @@
 -- UUIDs match src/lib/demoCoachLlmConfig.ts (DEMO_COACH_LLM_SEED_UUIDS).
 --
 -- Before running part 2:
--- 1. Create a Supabase Auth user (email + password) for the demo coach.
+-- 1. Create Supabase Auth user coach-demo@sfda.sg (email + password, auto-confirm).
 -- 2. Set profiles.role = 'coach' for that user.
 --
 -- Cloudflare env (after seed):
@@ -70,14 +70,14 @@ values
   )
 on conflict (campaign_id, athlete_id) do nothing;
 
--- Part 2: assign demo coach (replace email if you used a different address)
+-- Part 2: assign demo coach (backend identity for LLM; UI still uses coach@sufa.test)
 insert into public.campaign_coaches (campaign_id, coach_profile_id, coach_role)
 select
   'c0000000-0000-4000-8000-000000000001',
   p.id,
   'head_coach'
 from public.profiles p
-where p.email = 'coach-demo@example.com'
+where p.email = 'coach-demo@sfda.sg'
   and p.role = 'coach'
 on conflict (campaign_id, coach_profile_id) do nothing;
 
@@ -104,7 +104,7 @@ select
   'submitted',
   now()
 from public.profiles p
-where p.email = 'coach-demo@example.com'
+where p.email = 'coach-demo@sfda.sg'
   and p.role = 'coach'
   and not exists (
     select 1

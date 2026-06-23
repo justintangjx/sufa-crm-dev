@@ -186,8 +186,8 @@ Supabase setup for hybrid demo:
 
 1. Apply coach-note migrations (`pnpm` / `supabase db push`).
 2. Deploy `structure-coach-notes` and `demo-coach-session`.
-3. Create a Supabase Auth user for the demo coach (`coach-demo@example.com` or your address),
-   set `profiles.role = coach`, then run `supabase/seed-demo-coach.sql` in the SQL editor.
+3. Create Supabase Auth user `coach-demo@sfda.sg` (password + auto-confirm), set
+   `profiles.role = coach`, then run `supabase/seed-demo-coach.sql` in the SQL editor.
 4. Edge secrets:
 
 ```txt
