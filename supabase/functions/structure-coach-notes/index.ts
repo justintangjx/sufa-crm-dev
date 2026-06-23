@@ -120,25 +120,14 @@ Deno.serve(async (request) => {
     return json(400, { error: "invalid_request" });
   }
 
-  const [
-    { data: role, error: roleError },
-    { data: assignment, error: assignmentError },
-    { data: membership, error: membershipError },
-  ] = await Promise.all([
-    authenticated.rpc("current_profile_role"),
-    authenticated
-      .from("campaign_coaches")
-      .select("id")
-      .eq("campaign_id", campaignId)
-      .eq("coach_profile_id", user.id)
-      .maybeSingle(),
-    authenticated
-      .from("campaign_members")
-      .select("athlete_id")
-      .eq("campaign_id", campaignId)
-      .eq("athlete_id", athleteId)
-      .maybeSingle(),
-  ]);
+  const [{ data: role, error: roleError }, { data: canStructure, error: accessError }] =
+    await Promise.all([
+      authenticated.rpc("current_profile_role"),
+      authenticated.rpc("coach_can_structure_notes", {
+        p_campaign_id: campaignId,
+        p_athlete_id: athleteId,
+      }),
+    ]);
 
   if (roleError) {
     console.error("assignment_lookup_current_profile_role", roleError);
@@ -148,30 +137,19 @@ Deno.serve(async (request) => {
       code: roleError.code,
     });
   }
-  if (assignmentError) {
-    console.error("assignment_lookup_campaign_coaches", assignmentError);
+  if (accessError) {
+    console.error("assignment_lookup_coach_can_structure_notes", accessError);
     return json(500, {
       error: "assignment_lookup_failed",
-      stage: "campaign_coaches",
-      code: assignmentError.code,
-    });
-  }
-  if (membershipError) {
-    console.error("assignment_lookup_campaign_members", membershipError);
-    return json(500, {
-      error: "assignment_lookup_failed",
-      stage: "campaign_members",
-      code: membershipError.code,
+      stage: "coach_can_structure_notes",
+      code: accessError.code,
     });
   }
   if (role !== "coach") {
     return json(403, { error: "coach_role_required" });
   }
-  if (!assignment) {
+  if (!canStructure) {
     return json(403, { error: "coach_campaign_assignment_required" });
-  }
-  if (!membership) {
-    return json(403, { error: "athlete_not_in_campaign" });
   }
 
   const { data: athlete, error: athleteError } = await authenticated
