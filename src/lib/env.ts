@@ -16,10 +16,32 @@ export const isSupabaseConfigured = Boolean(url && anonKey);
 // in-memory mock backend so dev and tests work fully offline.
 export const useMockBackend = isTest || forceMock || !isSupabaseConfigured;
 
-// The real coach LLM calls a Supabase Edge Function and requires provider secrets.
-// Keep it off in production unless explicitly enabled; mock/test mode uses the
-// deterministic Api double so demos and E2E can still exercise the UI.
-export const enableCoachLlm = forceCoachLlm || useMockBackend;
+// Hybrid demo: mock login buttons + real Edge Function LLM for the coach evaluation flow.
+export const demoCoachLlm =
+  !isTest && import.meta.env.VITE_DEMO_COACH_LLM === "true" && isSupabaseConfigured;
+
+export const demoCoachGateToken =
+  (import.meta.env.VITE_COACH_DEMO_GATE_TOKEN as string | undefined) ?? "";
+
+function parseDemoCoachLlmIdMap(): Record<string, string> {
+  const raw = import.meta.env.VITE_DEMO_COACH_LLM_ID_MAP as string | undefined;
+  if (!raw) {
+    return {};
+  }
+  try {
+    return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+export const demoCoachLlmIdMap = parseDemoCoachLlmIdMap();
+
+// Real remote LLM: production flag on Supabase backend, or hybrid demo coach mode.
+export const useRemoteCoachLlm =
+  (!useMockBackend && forceCoachLlm) || (useMockBackend && demoCoachLlm);
+
+export const enableCoachLlm = useRemoteCoachLlm;
 
 export const appUrl =
   (import.meta.env.VITE_APP_URL as string | undefined) ??

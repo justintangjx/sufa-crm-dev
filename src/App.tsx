@@ -13,7 +13,8 @@ import {
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { api } from "./data";
-import { enableCoachLlm, useMockBackend } from "./lib/env";
+import { demoCoachLlm, enableCoachLlm, useMockBackend } from "./lib/env";
+import { demoCoachLlmConfigError } from "./lib/demoCoachLlmConfig";
 import type {
   AdminStats,
   AthletePatch,
@@ -152,6 +153,17 @@ const roleNav: Record<Role, { to: string; label: string }[]> = {
   ],
 };
 
+function DemoCoachLlmConfigBanner() {
+  if (!demoCoachLlm || !demoCoachLlmConfigError) {
+    return null;
+  }
+  return (
+    <p className="alert warn demo-coach-config-banner" role="status">
+      Demo coach LLM is misconfigured: {demoCoachLlmConfigError}
+    </p>
+  );
+}
+
 function AppLayout() {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
@@ -185,6 +197,7 @@ function AppLayout() {
           </div>
         ) : null}
       </header>
+      <DemoCoachLlmConfigBanner />
       <main className="app-main">
         <Outlet />
       </main>
@@ -263,6 +276,7 @@ function LoginPage() {
         <div className="auth-form-inner">
           <section className="card auth-card">
             <PageHead title="Sign in" subtitle="Use your SUFA email to request a magic link." />
+            <DemoCoachLlmConfigBanner />
             <form onSubmit={handleSubmit}>
               <div className="field">
                 <label htmlFor="email">Email</label>
@@ -283,6 +297,11 @@ function LoginPage() {
             {useMockBackend ? (
               <div className="auth-demo">
                 <p className="muted">Demo mode &mdash; sign in instantly as:</p>
+                {demoCoachLlm ? (
+                  <p className="muted">
+                    Coach evaluations use the live LLM when you sign in as Coach.
+                  </p>
+                ) : null}
                 <div className="btn-row">
                   {demoAccounts.map((account) => (
                     <button
@@ -1515,25 +1534,6 @@ function CoachEvaluationPage() {
     const nextClarifications = options.nextClarifications ?? clarifications;
     const nextAdditionalNotes = options.nextAdditionalNotes ?? additionalNotes;
 
-    if (!enableCoachLlm) {
-      const accumulatedInput = buildAccumulatedInput(
-        roughNotes,
-        nextClarifications,
-        nextAdditionalNotes,
-      );
-      const draft = createDeterministicCoachNoteDraft(accumulatedInput);
-      applyCoachNoteDraft(draft);
-      setClarifications(nextClarifications);
-      setAdditionalNotes(nextAdditionalNotes);
-      setPendingClarifications({});
-      setGenerationResult(null);
-      setGenerationError(null);
-      setFeedback(null);
-      setMessage(`${options.successMessage} Review every field before saving.`);
-      scrollToStructuredSection();
-      return;
-    }
-
     setGenerating(true);
     setGenerationError(null);
     setFeedback(null);
@@ -1556,10 +1556,16 @@ function CoachEvaluationPage() {
       setClarifications(nextClarifications);
       setAdditionalNotes(nextAdditionalNotes);
       setPendingClarifications({});
-      setMessage(options.successMessage);
+      setMessage(
+        enableCoachLlm
+          ? options.successMessage
+          : `${options.successMessage} Review every field before saving.`,
+      );
     } catch {
       setGenerationError(
-        "The LLM draft is unavailable. You can retry or explicitly use the deterministic fallback.",
+        enableCoachLlm
+          ? "The LLM draft is unavailable. You can retry or explicitly use the deterministic fallback."
+          : "The evaluation copilot could not save telemetry. Check that coach-note migrations are applied, then retry.",
       );
       setMessage(null);
       setGenerating(false);
@@ -1796,7 +1802,9 @@ function CoachEvaluationPage() {
         ) : null}
         <p className="muted">
           {enableCoachLlm
-            ? "The copilot structures evidence only. It never sets ratings or recommendations."
+            ? demoCoachLlm
+              ? "Demo mode with live LLM drafting. The copilot structures evidence only; it never sets ratings or recommendations."
+              : "The copilot structures evidence only. It never sets ratings or recommendations."
             : "Production LLM drafting is disabled until the Supabase Edge Function is deployed. This uses the local deterministic structurer."}
         </p>
         {generationResult ? (

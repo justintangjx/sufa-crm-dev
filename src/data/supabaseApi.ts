@@ -5,7 +5,12 @@ import { appUrl } from "../lib/env";
 import { getMissingAthleteFields } from "../lib/profile";
 import { getPassportStatus } from "../lib/passport";
 import { supabase } from "../lib/supabase";
-import { buildAccumulatedInput } from "../lib/coachNotes";
+import { useRemoteCoachLlm } from "../lib/env";
+import {
+  invokeCoachNoteAction,
+  recordRemoteCoachNoteEditMetrics,
+  submitRemoteCoachNoteFeedback,
+} from "./coachNoteRemote";
 import type {
   AssistantDraft,
   Athlete,
@@ -27,6 +32,8 @@ import type {
   SignInResult,
 } from "./types";
 import type { CoachNoteActionRequest, CoachNoteGenerationRequest } from "../lib/coachNotes";
+import { executeDeterministicCoachNoteAction } from "./coachNoteExecutor";
+import { createSupabaseCoachNotePersistence } from "./coachNoteSupabasePersistence";
 
 function client() {
   if (!supabase) {
@@ -354,31 +361,18 @@ export const supabaseApi: Api = {
   },
 
   async coachNoteAction(input: CoachNoteActionRequest) {
-    const accumulatedInput = buildAccumulatedInput(
-      input.roughNotes,
-      input.clarifications ?? [],
-      input.additionalNotes ?? "",
-    );
-    const { data, error } = await client().functions.invoke("structure-coach-notes", {
-      body: {
-        campaignId: input.campaignId,
-        athleteId: input.athleteId,
-        roughNotes: input.roughNotes,
-        action: input.action,
-        sessionId: input.sessionId,
-        clarifications: input.clarifications ?? [],
-        additionalNotes: input.additionalNotes ?? "",
-        section: input.section,
-      },
-    });
-    if (error) {
-      throw error;
+    if (!useRemoteCoachLlm) {
+      const profile = await supabaseApi.getCurrentProfile();
+      if (!profile || profile.role !== "coach") {
+        throw new Error("Coach is not assigned to this athlete");
+      }
+      return executeDeterministicCoachNoteAction(
+        input,
+        profile.id,
+        createSupabaseCoachNotePersistence(client()),
+      );
     }
-    const result = data as Awaited<ReturnType<Api["coachNoteAction"]>>;
-    return {
-      ...result,
-      accumulatedInput: result.accumulatedInput ?? accumulatedInput,
-    };
+    return invokeCoachNoteAction(input);
   },
 
   async generateCoachNoteDraft(input: CoachNoteGenerationRequest) {
@@ -386,29 +380,37 @@ export const supabaseApi: Api = {
   },
 
   async submitCoachNoteFeedback(input) {
-    const { error } = await client()
-      .from("coach_note_generation_runs")
-      .update({
-        feedback: input.feedback,
-        feedback_at: new Date().toISOString(),
-      })
-      .eq("id", input.runId);
-    if (error) {
-      throw error;
+    if (!useRemoteCoachLlm) {
+      const { error } = await client()
+        .from("coach_note_generation_runs")
+        .update({
+          feedback: input.feedback,
+          feedback_at: new Date().toISOString(),
+        })
+        .eq("id", input.runId);
+      if (error) {
+        throw error;
+      }
+      return;
     }
+    return submitRemoteCoachNoteFeedback(input);
   },
 
   async recordCoachNoteEditMetrics(input) {
-    const { error } = await client()
-      .from("coach_note_generation_runs")
-      .update({
-        field_edit_count: input.fieldEditCount,
-        normalized_edit_distance: input.normalizedEditDistance,
-      })
-      .eq("id", input.runId);
-    if (error) {
-      throw error;
+    if (!useRemoteCoachLlm) {
+      const { error } = await client()
+        .from("coach_note_generation_runs")
+        .update({
+          field_edit_count: input.fieldEditCount,
+          normalized_edit_distance: input.normalizedEditDistance,
+        })
+        .eq("id", input.runId);
+      if (error) {
+        throw error;
+      }
+      return;
     }
+    return recordRemoteCoachNoteEditMetrics(input);
   },
 };
 

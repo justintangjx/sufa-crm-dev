@@ -45,18 +45,34 @@ a message-thread UI unless pilot metrics and eval gates fail after copilot turns
 The app works fully in mock mode (tests, offline dev, Playwright) without deploying
 Cloudflare or the Supabase Edge Function:
 
-- `VITE_ENABLE_COACH_LLM=false` (default) uses the local deterministic structurer.
-- Mock mode exercises the full copilot UI, sessions, prior-eval panel, and telemetry.
+- `VITE_ENABLE_COACH_LLM=false` (default) uses the deterministic structurer with full
+  copilot telemetry when coach-note migrations are applied.
+- Mock mode exercises the full copilot UI without Supabase.
 - Supabase + `VITE_ENABLE_COACH_LLM=true` requires migrations, Edge Function deploy,
-  and provider secrets before remote generation works.
+  and provider secrets before remote LLM generation works.
+- Hybrid demo: `VITE_USE_MOCK=true` + `VITE_DEMO_COACH_LLM=true` keeps instant
+  `coach@sufa.test` login while coach evaluations call the live Edge Function. Seed data:
+  `supabase/seed-demo-coach.sql`. Misconfigured env shows a startup banner. See
+  `docs/context.md` (Demo coach with live LLM).
 
 Deployment checklist when ready:
 
-1. Apply Supabase migrations (including `20260617000000_coach_note_copilot.sql`).
-2. Deploy `structure-coach-notes` and set Edge Function secrets.
-3. Set `VITE_ENABLE_COACH_LLM=true` only in staging/pilot environments.
-4. Run `pnpm eval:coach:live` against the deployed function.
-5. Complete human blind review before production pilot.
+Apply Supabase migrations **in filename order** (partial apply breaks telemetry and the
+Edge Function):
+
+1. `20260615000000_coach_note_generation.sql` — creates `coach_note_generation_runs`
+2. `20260617000000_coach_note_copilot.sql` — sessions, turns, ambiguity columns
+3. `20260618000000_coach_note_deterministic_telemetry.sql` — coach INSERT for flag-off path
+
+Then:
+
+4. Deploy `structure-coach-notes` and set Edge Function secrets.
+5. Set `VITE_ENABLE_COACH_LLM=true` only in staging/pilot environments.
+6. Run `pnpm eval:coach:live` against the deployed function.
+7. Complete human blind review before production pilot.
+
+Shared contract source of truth: edit `shared/coach-note-core.ts`, then run
+`pnpm sync:coach-note-core` (also runs at the start of `pnpm check`).
 
 ## Optimization Model
 
@@ -82,10 +98,10 @@ a single `structure` turn). In mock mode it uses a deterministic evaluation doub
 full session/turn logging. In Supabase mode it invokes the `structure-coach-notes` Edge
 Function only when `VITE_ENABLE_COACH_LLM=true`.
 
-Leave `VITE_ENABLE_COACH_LLM` unset or `false` in production until the migration,
-Edge Function, provider secrets, and live eval checks are complete. With the flag off,
-the coach page uses the local deterministic structurer and does not call the Edge
-Function.
+Leave `VITE_ENABLE_COACH_LLM` unset or `false` in production until the Edge Function,
+provider secrets, and live eval checks are complete. With the flag off, `coachNoteAction`
+runs the deterministic structurer client-side and writes session/run/turn telemetry to
+Supabase when the coach-note migrations are applied. It does not call the Edge Function.
 
 The Edge Function:
 

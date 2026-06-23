@@ -1,0 +1,3 @@
+# Demo session issuer is gated by COACH_DEMO_ENABLED + COACH_DEMO_GATE_TOKEN server secrets.
+[functions.demo-coach-session]
+verify_jwt = false

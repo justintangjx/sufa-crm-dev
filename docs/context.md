@@ -126,6 +126,14 @@ npx supabase link --project-ref kowzzhlpeesmuoosuobl
 npx supabase db push
 ```
 
+Coach-note migrations must apply in order:
+
+1. `20260615000000_coach_note_generation.sql`
+2. `20260617000000_coach_note_copilot.sql`
+3. `20260618000000_coach_note_deterministic_telemetry.sql`
+
+See `docs/coach-llm.md` for Edge Function deploy and `VITE_ENABLE_COACH_LLM`.
+
 Supabase Auth URL configuration:
 
 - Site URL: `https://sufa-crm-dev.pages.dev`
@@ -162,6 +170,37 @@ VITE_USE_MOCK=true
 ```
 
 That mode bypasses real magic-link delivery and uses the in-memory mock backend.
+
+**Demo coach with live LLM** (one-click `coach@sufa.test` + real model drafting):
+
+```txt
+VITE_USE_MOCK=true
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+VITE_DEMO_COACH_LLM=true
+VITE_COACH_DEMO_GATE_TOKEN=<same value as COACH_DEMO_GATE_TOKEN edge secret>
+VITE_DEMO_COACH_LLM_ID_MAP={"c-sea":"c0000000-0000-4000-8000-000000000001","a-alice":"a0000000-0000-4000-8000-000000000001","a-ben":"a0000000-0000-4000-8000-000000000002","a-cara":"a0000000-0000-4000-8000-000000000003"}
+```
+
+Supabase setup for hybrid demo:
+
+1. Apply coach-note migrations (`pnpm` / `supabase db push`).
+2. Deploy `structure-coach-notes` and `demo-coach-session`.
+3. Create a Supabase Auth user for the demo coach (`coach-demo@example.com` or your address),
+   set `profiles.role = coach`, then run `supabase/seed-demo-coach.sql` in the SQL editor.
+4. Edge secrets:
+
+```txt
+COACH_DEMO_ENABLED=true
+COACH_DEMO_GATE_TOKEN=<matches VITE_COACH_DEMO_GATE_TOKEN>
+COACH_DEMO_EMAIL=<demo coach login email>
+COACH_DEMO_PASSWORD=<demo coach password>
+COACH_NOTE_API_URL=...
+COACH_NOTE_API_KEY=...
+COACH_NOTE_MODEL=...
+```
+
+Keep `COACH_DEMO_ENABLED=false` on production deployments that should not issue demo sessions. The gate token is client-visible; demo mode is for controlled preview/demo hosts only. `demo-coach-session` rate-limits to 10 requests per client IP per hour (per edge isolate).
 
 ## Demo Flows
 

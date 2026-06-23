@@ -15,11 +15,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "eval:coach:deterministic": "vitest run src/lib/coachNotes.test.ts src/evals/coach-notes/coachNotes.eval.test.ts src/evals/coach-notes/multi-turn.eval.test.ts",
+    "eval:coach:deterministic": "vitest run src/lib/coachNotes.test.ts src/shared/coach-note-core.sync.test.ts src/evals/coach-notes/coachNotes.eval.test.ts src/evals/coach-notes/multi-turn.eval.test.ts",
     "eval:coach:live": "node scripts/eval-coach-live.mjs",
     "eval:coach:compare": "node scripts/eval-coach-compare.mjs",
     "e2e": "playwright test",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
+    "sync:coach-note-core": "node scripts/sync-coach-note-core.mjs",
+    "check": "pnpm sync:coach-note-core && pnpm typecheck && pnpm lint && pnpm format:check && pnpm test"
   },
   "dependencies": {
     "@fontsource-variable/space-grotesk": "^5.2.10",

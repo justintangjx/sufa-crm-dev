@@ -1,37 +1,43 @@
-export const COACH_NOTE_SCHEMA_VERSION = 1 as const;
-export const COACH_NOTE_PROMPT_VERSION = "coach-notes-v1";
+import {
+  buildAccumulatedInput,
+  COACH_NOTE_MAX_TURNS,
+  DECISION_PATTERNS,
+  formatClarificationBlock,
+  PROMPT_VERSION,
+  SCHEMA_VERSION,
+  validateCoachNoteDraftErrors,
+  type CoachNoteAction,
+  type CoachNoteAmbiguity,
+  type CoachNoteClarification,
+  type CoachNoteConfidence,
+  type EvidenceItem,
+} from "../shared/coach-note-core.ts";
 
-export type CoachNoteConfidence = "high" | "medium" | "low";
+export {
+  buildAccumulatedInput,
+  COACH_NOTE_MAX_TURNS,
+  formatClarificationBlock,
+  SCHEMA_VERSION as COACH_NOTE_SCHEMA_VERSION,
+  PROMPT_VERSION as COACH_NOTE_PROMPT_VERSION,
+};
+export type {
+  CoachNoteAction,
+  CoachNoteAmbiguity,
+  CoachNoteClarification,
+  CoachNoteConfidence,
+  EvidenceItem,
+};
+
 export type CoachNoteField = "strength" | "development" | "overall";
 export type CoachNoteFeedback = "useful" | "incorrect" | "missing_context";
-
-export interface EvidenceItem {
-  draftText: string;
-  evidenceQuotes: string[];
-  confidence: CoachNoteConfidence;
-}
-
-export interface CoachNoteAmbiguity {
-  sourceQuote: string;
-  question: string;
-}
+export type CoachNoteSection = "strengths" | "development_areas" | "overall_observations";
 
 export interface CoachNoteDraftV1 {
-  schemaVersion: typeof COACH_NOTE_SCHEMA_VERSION;
+  schemaVersion: typeof SCHEMA_VERSION;
   strengths: EvidenceItem[];
   developmentAreas: EvidenceItem[];
   overallObservations: EvidenceItem[];
   ambiguities: CoachNoteAmbiguity[];
-}
-
-export type CoachNoteAction = "structure" | "clarify" | "add_notes" | "regenerate_section";
-export type CoachNoteSection = "strengths" | "development_areas" | "overall_observations";
-
-export const COACH_NOTE_MAX_TURNS = 5;
-
-export interface CoachNoteClarification {
-  sourceQuote: string;
-  answer: string;
 }
 
 export interface CoachNoteGenerationRequest {
@@ -50,7 +56,7 @@ export interface CoachNoteActionRequest extends CoachNoteGenerationRequest {
 
 export interface CoachNoteGenerationResult {
   runId: string;
-  source: "llm";
+  source: "llm" | "deterministic";
   promptVersion: string;
   model: string;
   latencyMs: number;
@@ -106,37 +112,6 @@ const DEVELOPMENT_KEYWORDS = [
   "not ready",
 ] as const;
 
-const CLARIFICATION_HEADER =
-  "--- Coach clarifications (ground only when supported by original notes) ---";
-
-export function formatClarificationBlock(
-  clarifications: readonly CoachNoteClarification[],
-): string {
-  if (clarifications.length === 0) {
-    return "";
-  }
-  const lines = clarifications.map(
-    (clarification) => `Regarding "${clarification.sourceQuote}": ${clarification.answer}`,
-  );
-  return `${CLARIFICATION_HEADER}\n${lines.join("\n")}`;
-}
-
-export function buildAccumulatedInput(
-  roughNotes: string,
-  clarifications: readonly CoachNoteClarification[] = [],
-  additionalNotes = "",
-): string {
-  const parts = [roughNotes.trim()];
-  const clarificationBlock = formatClarificationBlock(clarifications);
-  if (clarificationBlock) {
-    parts.push(clarificationBlock);
-  }
-  if (additionalNotes.trim()) {
-    parts.push(`--- Additional notes ---\n${additionalNotes.trim()}`);
-  }
-  return parts.filter(Boolean).join("\n\n");
-}
-
 export function countAmbiguities(draft: CoachNoteDraftV1): number {
   return draft.ambiguities.length;
 }
@@ -156,114 +131,11 @@ export function suggestedAmbiguityOptions(sourceQuote: string): string[] {
   return ["Clarify as observational fact", "Skip — I will edit the form manually"];
 }
 
-const DECISION_PATTERNS = [
-  /\bnot[_ -]?selected\b/i,
-  /\bselected\b/i,
-  /\bselect\b/i,
-  /\breserve\b/i,
-  /\brecommend(?:ation|ed)?\b/i,
-  /\brating\b/i,
-  /\b[1-5]\s*\/\s*5\b/i,
-] as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isConfidence(value: unknown): value is CoachNoteConfidence {
-  return value === "high" || value === "medium" || value === "low";
-}
-
-function validateEvidenceItems(
-  value: unknown,
-  field: string,
-  sourceNotes: string,
-  errors: string[],
-): void {
-  if (!Array.isArray(value)) {
-    errors.push(`${field} must be an array`);
-    return;
-  }
-
-  value.forEach((item, index) => {
-    const path = `${field}[${index}]`;
-    if (!isRecord(item)) {
-      errors.push(`${path} must be an object`);
-      return;
-    }
-    const draftText = item.draftText;
-    if (typeof draftText !== "string" || draftText.trim().length === 0) {
-      errors.push(`${path}.draftText must be non-empty`);
-    } else if (DECISION_PATTERNS.some((pattern) => pattern.test(draftText))) {
-      errors.push(`${path}.draftText contains a rating or selection decision`);
-    }
-    if (!Array.isArray(item.evidenceQuotes) || item.evidenceQuotes.length === 0) {
-      errors.push(`${path}.evidenceQuotes must contain at least one quote`);
-    } else {
-      item.evidenceQuotes.forEach((quote, quoteIndex) => {
-        if (typeof quote !== "string" || quote.length === 0) {
-          errors.push(`${path}.evidenceQuotes[${quoteIndex}] must be non-empty`);
-        } else if (!sourceNotes.includes(quote)) {
-          errors.push(`${path}.evidenceQuotes[${quoteIndex}] is not grounded in the notes`);
-        }
-      });
-    }
-    if (!isConfidence(item.confidence)) {
-      errors.push(`${path}.confidence is invalid`);
-    }
-  });
-}
-
 export function validateCoachNoteDraft(
   value: unknown,
   sourceNotes: string,
 ): CoachNoteValidationResult {
-  const errors: string[] = [];
-  if (!isRecord(value)) {
-    return { valid: false, errors: ["draft must be an object"] };
-  }
-
-  const allowedKeys = new Set([
-    "schemaVersion",
-    "strengths",
-    "developmentAreas",
-    "overallObservations",
-    "ambiguities",
-  ]);
-  for (const key of Object.keys(value)) {
-    if (!allowedKeys.has(key)) {
-      errors.push(`unexpected field: ${key}`);
-    }
-  }
-
-  if (value.schemaVersion !== COACH_NOTE_SCHEMA_VERSION) {
-    errors.push(`schemaVersion must be ${COACH_NOTE_SCHEMA_VERSION}`);
-  }
-  validateEvidenceItems(value.strengths, "strengths", sourceNotes, errors);
-  validateEvidenceItems(value.developmentAreas, "developmentAreas", sourceNotes, errors);
-  validateEvidenceItems(value.overallObservations, "overallObservations", sourceNotes, errors);
-
-  if (!Array.isArray(value.ambiguities)) {
-    errors.push("ambiguities must be an array");
-  } else {
-    value.ambiguities.forEach((ambiguity, index) => {
-      const path = `ambiguities[${index}]`;
-      if (!isRecord(ambiguity)) {
-        errors.push(`${path} must be an object`);
-        return;
-      }
-      if (
-        typeof ambiguity.sourceQuote !== "string" ||
-        !sourceNotes.includes(ambiguity.sourceQuote)
-      ) {
-        errors.push(`${path}.sourceQuote is not grounded in the notes`);
-      }
-      if (typeof ambiguity.question !== "string" || ambiguity.question.trim().length === 0) {
-        errors.push(`${path}.question must be non-empty`);
-      }
-    });
-  }
-
+  const errors = validateCoachNoteDraftErrors(value, sourceNotes);
   return { valid: errors.length === 0, errors };
 }
 
@@ -312,7 +184,7 @@ export function createDeterministicCoachNoteDraft(notes: string): CoachNoteDraft
   }
 
   return {
-    schemaVersion: COACH_NOTE_SCHEMA_VERSION,
+    schemaVersion: SCHEMA_VERSION,
     strengths,
     developmentAreas,
     overallObservations,

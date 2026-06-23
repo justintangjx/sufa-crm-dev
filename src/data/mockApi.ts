@@ -1,15 +1,16 @@
 // In-memory implementation of the data Api. Used offline (dev + tests).
 import { getMissingAthleteFields } from "../lib/profile";
 import { getPassportStatus } from "../lib/passport";
+import { clearDemoCoachSession } from "../lib/demoCoachLlm";
+import { demoCoachLlm, useRemoteCoachLlm } from "../lib/env";
+import type { CoachNoteActionRequest, CoachNoteGenerationRequest } from "../lib/coachNotes";
 import {
-  COACH_NOTE_MAX_TURNS,
-  COACH_NOTE_PROMPT_VERSION,
-  buildAccumulatedInput,
-  countAmbiguities,
-  createDeterministicCoachNoteDraft,
-  type CoachNoteActionRequest,
-  type CoachNoteGenerationRequest,
-} from "../lib/coachNotes";
+  invokeCoachNoteAction,
+  recordRemoteCoachNoteEditMetrics,
+  submitRemoteCoachNoteFeedback,
+} from "./coachNoteRemote";
+import { executeDeterministicCoachNoteAction } from "./coachNoteExecutor";
+import { createMockCoachNotePersistence } from "./coachNoteMockPersistence";
 import type {
   AssistantDraft,
   Athlete,
@@ -17,9 +18,6 @@ import type {
   ChangeRequest,
   CoachAthleteView,
   CoachEvaluation,
-  CoachNoteGenerationRun,
-  CoachNoteSession,
-  CoachNoteTurn,
   PriorCoachEvaluation,
 } from "../types/database";
 import type {
@@ -46,24 +44,6 @@ function displayName(a: Pick<Athlete, "preferred_name" | "legal_name">): string 
 
 function findAthlete(athleteId: string): Athlete | undefined {
   return getData().athletes.find((a) => a.id === athleteId);
-}
-
-function assertCoachAssignment(
-  campaignId: string,
-  athleteId: string,
-  coachProfileId: string,
-): void {
-  const data = getData();
-  const profile = data.profiles.find((row) => row.id === coachProfileId);
-  const assignedCampaign = data.campaignCoaches.some(
-    (row) => row.campaign_id === campaignId && row.coach_profile_id === coachProfileId,
-  );
-  const assignedAthlete = data.campaignMembers.some(
-    (row) => row.campaign_id === campaignId && row.athlete_id === athleteId,
-  );
-  if (!coachProfileId || profile?.role !== "coach" || !assignedCampaign || !assignedAthlete) {
-    throw new Error("Coach is not assigned to this athlete");
-  }
 }
 
 function findCampaignName(campaignId: string): string {
@@ -99,6 +79,9 @@ export const mockApi: Api = {
 
   async signOut() {
     setCurrentUserId(null);
+    if (demoCoachLlm) {
+      await clearDemoCoachSession();
+    }
   },
 
   async getAthleteForProfile(profileId: string) {
@@ -413,117 +396,19 @@ export const mockApi: Api = {
   },
 
   async coachNoteAction(input: CoachNoteActionRequest) {
-    const data = getData();
     const coachProfileId = getCurrentUserId();
-    assertCoachAssignment(input.campaignId, input.athleteId, coachProfileId ?? "");
-
-    let session: CoachNoteSession | undefined = input.sessionId
-      ? data.coachNoteSessions.find(
-          (row) =>
-            row.id === input.sessionId &&
-            row.coach_profile_id === coachProfileId &&
-            row.campaign_id === input.campaignId &&
-            row.athlete_id === input.athleteId,
-        )
-      : undefined;
-    if (input.sessionId && !session) {
-      throw new Error("Coach note session not found");
+    if (!coachProfileId) {
+      throw new Error("Coach is not assigned to this athlete");
     }
-    if (session && session.turn_count >= COACH_NOTE_MAX_TURNS) {
-      throw new Error("Coach note session turn limit reached");
+    if (useRemoteCoachLlm) {
+      return invokeCoachNoteAction(input);
     }
-
-    const accumulatedInput = buildAccumulatedInput(
-      input.roughNotes,
-      input.clarifications ?? [],
-      input.additionalNotes ?? "",
+    return executeDeterministicCoachNoteAction(
+      input,
+      coachProfileId,
+      createMockCoachNotePersistence(coachProfileId),
+      now,
     );
-    const turnIndex = session?.turn_count ?? 0;
-    const draft = createDeterministicCoachNoteDraft(accumulatedInput);
-    const ambiguityCount = countAmbiguities(draft);
-
-    if (!session) {
-      session = {
-        id: generateId("coach-session"),
-        campaign_id: input.campaignId,
-        athlete_id: input.athleteId,
-        coach_profile_id: coachProfileId!,
-        accumulated_input: accumulatedInput,
-        turn_count: 0,
-        status: "active",
-        created_at: now(),
-        updated_at: now(),
-      };
-      data.coachNoteSessions.push(session);
-    }
-
-    const run: CoachNoteGenerationRun = {
-      id: generateId("coach-note"),
-      campaign_id: input.campaignId,
-      athlete_id: input.athleteId,
-      coach_profile_id: coachProfileId!,
-      schema_version: 1,
-      prompt_version: COACH_NOTE_PROMPT_VERSION,
-      provider: "mock",
-      model: "deterministic-eval-double",
-      source: "llm",
-      status: "succeeded",
-      redacted_input: accumulatedInput,
-      redacted_output: draft,
-      validation_errors: [],
-      latency_ms: 0,
-      input_tokens: null,
-      output_tokens: null,
-      estimated_cost_usd: 0,
-      repair_count: 0,
-      error_code: null,
-      feedback: null,
-      feedback_at: null,
-      field_edit_count: null,
-      normalized_edit_distance: null,
-      ambiguity_count: ambiguityCount,
-      session_id: session.id,
-      turn_index: turnIndex,
-      created_at: now(),
-    };
-    data.coachNoteGenerationRuns.push(run);
-
-    const turn: CoachNoteTurn = {
-      id: generateId("coach-turn"),
-      session_id: session.id,
-      turn_index: turnIndex,
-      action: input.action,
-      payload: {
-        clarifications: input.clarifications ?? [],
-        additionalNotes: input.additionalNotes ?? "",
-        section: input.section ?? null,
-      },
-      draft_snapshot: draft,
-      run_id: run.id,
-      created_at: now(),
-    };
-    data.coachNoteTurns.push(turn);
-
-    session.accumulated_input = accumulatedInput;
-    session.turn_count = turnIndex + 1;
-    session.updated_at = now();
-
-    saveData(data);
-    return {
-      runId: run.id,
-      source: "llm" as const,
-      promptVersion: run.prompt_version,
-      model: run.model,
-      latencyMs: run.latency_ms ?? 0,
-      estimatedCostUsd: run.estimated_cost_usd,
-      repairCount: run.repair_count,
-      redactedNotes: run.redacted_input,
-      draft,
-      ambiguityCount,
-      sessionId: session.id,
-      turnIndex,
-      accumulatedInput,
-    };
   },
 
   async generateCoachNoteDraft(input: CoachNoteGenerationRequest) {
@@ -531,6 +416,9 @@ export const mockApi: Api = {
   },
 
   async submitCoachNoteFeedback(input) {
+    if (useRemoteCoachLlm) {
+      return submitRemoteCoachNoteFeedback(input);
+    }
     const data = getData();
     const coachProfileId = getCurrentUserId();
     const run = data.coachNoteGenerationRuns.find(
@@ -545,6 +433,9 @@ export const mockApi: Api = {
   },
 
   async recordCoachNoteEditMetrics(input) {
+    if (useRemoteCoachLlm) {
+      return recordRemoteCoachNoteEditMetrics(input);
+    }
     const data = getData();
     const coachProfileId = getCurrentUserId();
     const run = data.coachNoteGenerationRuns.find(

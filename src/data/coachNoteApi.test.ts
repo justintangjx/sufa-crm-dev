@@ -20,6 +20,7 @@ describe("coach note Api", () => {
     expect(JSON.stringify(result.draft)).not.toContain("recommendation");
     expect(result.draft.ambiguities[0]?.sourceQuote).toContain("Selected");
     expect(result.ambiguityCount).toBe(1);
+    expect(result.source).toBe("deterministic");
     expect(result.sessionId).toBeTruthy();
     expect(result.turnIndex).toBe(0);
 
