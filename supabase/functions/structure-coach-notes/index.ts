@@ -121,11 +121,11 @@ Deno.serve(async (request) => {
   }
 
   const [
-    { data: profile, error: profileError },
+    { data: role, error: roleError },
     { data: assignment, error: assignmentError },
     { data: membership, error: membershipError },
   ] = await Promise.all([
-    authenticated.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+    authenticated.rpc("current_profile_role"),
     authenticated
       .from("campaign_coaches")
       .select("id")
@@ -140,12 +140,12 @@ Deno.serve(async (request) => {
       .maybeSingle(),
   ]);
 
-  if (profileError) {
-    console.error("assignment_lookup_profiles", profileError);
+  if (roleError) {
+    console.error("assignment_lookup_current_profile_role", roleError);
     return json(500, {
       error: "assignment_lookup_failed",
-      stage: "profiles",
-      code: profileError.code,
+      stage: "current_profile_role",
+      code: roleError.code,
     });
   }
   if (assignmentError) {
@@ -164,7 +164,7 @@ Deno.serve(async (request) => {
       code: membershipError.code,
     });
   }
-  if (profile?.role !== "coach") {
+  if (role !== "coach") {
     return json(403, { error: "coach_role_required" });
   }
   if (!assignment) {
