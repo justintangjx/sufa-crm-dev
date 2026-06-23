@@ -331,7 +331,12 @@ Deno.serve(async (request) => {
   }
 
   if (errorCode || !draft) {
-    return json(502, { error: errorCode, runId: run.id, sessionId: activeSessionId });
+    return json(502, {
+      error: errorCode,
+      runId: run.id,
+      sessionId: activeSessionId,
+      ...(validationErrors.length > 0 ? { validationErrors } : {}),
+    });
   }
 
   const latencyMs = Date.now() - startedAt;
