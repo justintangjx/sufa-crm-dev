@@ -272,6 +272,173 @@ a:hover {
   font-size: 13px;
 }
 
+/* Role homepages */
+.player-readiness,
+.control-room {
+  margin-bottom: 16px;
+}
+.readiness-hero,
+.control-room-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.readiness-hero h2,
+.control-room-head h2 {
+  font-size: 28px;
+}
+.readiness-metrics,
+.ops-metrics {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.readiness-metrics {
+  grid-template-columns: repeat(3, 1fr);
+}
+.readiness-metric,
+.ops-metrics > div {
+  display: grid;
+  gap: 2px;
+  padding: 14px;
+  background: var(--surface-soft);
+}
+.readiness-metric strong,
+.ops-metrics strong,
+.readiness-score strong {
+  color: var(--text-h);
+  font-family: var(--display);
+  font-size: 28px;
+  line-height: 1;
+}
+.readiness-metric span,
+.ops-metrics span,
+.readiness-score span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.role-dashboard-grid,
+.ops-footer-grid {
+  margin-top: 16px;
+}
+.checklist,
+.campaign-strip,
+.action-list,
+.compact-list {
+  display: grid;
+  gap: 10px;
+}
+.checklist-item,
+.campaign-strip-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.checklist-item {
+  justify-content: flex-start;
+}
+.checklist-item > span {
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  flex: 0 0 auto;
+  background: var(--warn);
+  border-radius: 999px;
+}
+.checklist-item.complete > span {
+  background: var(--ok);
+}
+.campaign-strip-item strong,
+.checklist-item strong {
+  color: var(--text-h);
+}
+.control-room {
+  position: relative;
+  overflow: hidden;
+}
+.control-room::before {
+  content: "";
+  position: absolute;
+  right: -110px;
+  top: -90px;
+  width: 360px;
+  height: 150px;
+  border: 1px solid rgba(36, 71, 184, 0.16);
+  border-radius: 50%;
+  transform: rotate(-16deg);
+  pointer-events: none;
+}
+.control-room > * {
+  position: relative;
+}
+.readiness-score {
+  display: grid;
+  gap: 4px;
+  min-width: 170px;
+  padding: 14px;
+  background: var(--accent-bg);
+  border: 1px solid #cbd9ff;
+  border-radius: var(--radius);
+}
+.ops-metrics {
+  grid-template-columns: repeat(5, 1fr);
+}
+.ops-lanes,
+.ops-footer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.ops-footer-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+.ops-lane {
+  min-width: 0;
+  padding: 14px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.compact-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.compact-list li {
+  display: grid;
+  gap: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.compact-list li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.compact-list strong {
+  color: var(--text-h);
+}
+.compact-list span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.action-list a {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.action-list a:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
 /* Tables */
 .table-wrap {
   overflow-x: auto;
@@ -755,6 +922,19 @@ a:focus-visible {
   }
   .page-actions {
     justify-content: flex-start;
+  }
+  .readiness-hero,
+  .control-room-head {
+    flex-direction: column;
+  }
+  .readiness-score {
+    width: 100%;
+  }
+  .readiness-metrics,
+  .ops-metrics,
+  .ops-lanes,
+  .ops-footer-grid {
+    grid-template-columns: 1fr;
   }
   .auth-screen {
     grid-template-columns: 1fr;

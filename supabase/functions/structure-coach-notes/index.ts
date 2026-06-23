@@ -73,6 +73,14 @@ function countAmbiguities(draft: CoachNoteDraft): number {
   return draft.ambiguities.length;
 }
 
+function providerTimeoutMs(): number {
+  const configured = Number(Deno.env.get("COACH_NOTE_PROVIDER_TIMEOUT_MS") ?? "30000");
+  if (!Number.isFinite(configured) || configured < 5_000) {
+    return 30_000;
+  }
+  return Math.min(configured, 120_000);
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -255,7 +263,8 @@ Deno.serve(async (request) => {
   }
 
   try {
-    await generateValidated(0, startedAt + 5_000);
+    const generationDeadline = Date.now() + providerTimeoutMs();
+    await generateValidated(0, generationDeadline);
     if (!draft || validationErrors.length > 0) {
       throw new Error("output_validation_failed");
     }

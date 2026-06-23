@@ -17,7 +17,9 @@ describe("App routing", () => {
     await user.click(screen.getByRole("button", { name: /send magic link/i }));
 
     expect(await screen.findByRole("heading", { name: /admin dashboard/i })).toBeInTheDocument();
-    expect(screen.getByText(/total athletes/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
+    expect(await screen.findByText(/players travel-ready/i)).toBeInTheDocument();
+    expect(screen.getByText(/next admin actions/i)).toBeInTheDocument();
   });
 
   it("redirects a player away from admin routes", async () => {

@@ -112,7 +112,7 @@ The Edge Function:
    adapter.
 5. Requires the versioned JSON schema and exact evidence quotes.
 6. Rejects ratings, recommendations, selection decisions, and unsupported evidence.
-7. Makes at most one repair call inside a total five-second budget.
+7. Makes at most one repair call inside a configurable provider timeout (default 30s).
 8. Records a redacted success or failure run with `ambiguity_count`, `session_id`, and
    `turn_index`.
 9. Persists copilot session turns when the copilot migration is applied.
@@ -124,6 +124,7 @@ Configure Edge Function secrets:
 COACH_NOTE_API_URL
 COACH_NOTE_API_KEY
 COACH_NOTE_MODEL
+COACH_NOTE_PROVIDER_TIMEOUT_MS=30000
 COACH_NOTE_INPUT_COST_PER_MILLION
 COACH_NOTE_OUTPUT_COST_PER_MILLION
 ```

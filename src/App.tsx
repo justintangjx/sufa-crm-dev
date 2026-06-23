@@ -411,12 +411,15 @@ function PlayerDashboard() {
 
   const missing = useMemo(() => (athlete ? getMissingAthleteFields(athlete) : []), [athlete]);
   const completion = athlete ? getProfileCompletion(athlete) : 0;
+  const activeCampaigns = campaigns.filter((campaign) => campaign.status === "active");
+  const submittedReviewCount = athlete?.profile_status === "submitted" ? 1 : 0;
+  const blockerCount = missing.length;
 
   return (
     <>
       <PageHead
         title="Player Dashboard"
-        subtitle="Your profile checklist and campaign readiness."
+        subtitle="Your personal readiness checklist for national team campaigns."
         eyebrow="Player workspace"
         actions={
           <Link className="btn primary" to="/player/profile">
@@ -424,71 +427,106 @@ function PlayerDashboard() {
           </Link>
         }
       />
-      <div className="grid cols-2">
-        <section className="card stack">
+      <section className="card player-readiness stack">
+        <div className="readiness-hero">
+          <div>
+            <p className="eyebrow">Your readiness</p>
+            <h2>You're {completion}% ready</h2>
+            <p className="muted">
+              {blockerCount > 0
+                ? `${blockerCount} ${blockerCount === 1 ? "item is" : "items are"} blocking campaign readiness.`
+                : "Your required profile details are ready for campaign admin."}
+            </p>
+          </div>
+          <Badge tone={completion === 100 ? "ok" : "warn"}>{completion}%</Badge>
+        </div>
+        <div className="progress" aria-label={`Profile completion ${completion}%`}>
+          <span style={{ width: `${completion}%` }} />
+        </div>
+        <div className="readiness-metrics">
+          <div className="readiness-metric">
+            <strong>{blockerCount}</strong>
+            <span>Blocking items</span>
+          </div>
+          <div className="readiness-metric">
+            <strong>{submittedReviewCount}</strong>
+            <span>Submitted changes awaiting review</span>
+          </div>
+          <div className="readiness-metric">
+            <strong>{activeCampaigns.length}</strong>
+            <span>Active campaign assignments</span>
+          </div>
+        </div>
+      </section>
+      <div className="grid cols-2 role-dashboard-grid">
+        <section className="card stack checklist-panel">
           <div className="section-title">
-            <h2>Profile completion</h2>
-            <Badge tone={completion === 100 ? "ok" : "warn"}>{completion}%</Badge>
+            <h2>Personal checklist</h2>
+            <Badge tone={missing.length === 0 ? "ok" : "warn"}>
+              {missing.length === 0 ? "clear" : `${missing.length} left`}
+            </Badge>
           </div>
-          <div className="progress" aria-label={`Profile completion ${completion}%`}>
-            <span style={{ width: `${completion}%` }} />
-          </div>
+          {athlete?.profile_status === "submitted" ? (
+            <p className="alert warn">
+              Your latest profile submission is waiting for admin review.
+            </p>
+          ) : null}
           {missing.length > 0 ? (
-            <ul>
+            <div className="checklist">
               {missing.map((field) => (
-                <li key={field.field}>{field.label}</li>
+                <div className="checklist-item" key={field.field}>
+                  <span aria-hidden="true" />
+                  <div>
+                    <strong>{field.label}</strong>
+                    <p className="muted">{field.section}</p>
+                  </div>
+                </div>
               ))}
-            </ul>
+            </div>
           ) : (
-            <p>Your required profile details are complete.</p>
+            <div className="checklist-item complete">
+              <span aria-hidden="true" />
+              <div>
+                <strong>Profile details complete</strong>
+                <p className="muted">No required admin fields are missing right now.</p>
+              </div>
+            </div>
           )}
           <Link className="btn" to="/player/profile">
-            Complete missing details
+            {missing.length > 0 ? "Complete missing details" : "Review profile"}
           </Link>
         </section>
-        <section className="card stack assistant-card">
-          <h2>Assistant</h2>
-          <p>
-            {athlete
-              ? `${completion}% complete. ${missing.length} required items remaining.`
-              : "Loading profile..."}
-          </p>
+        <section className="card stack player-campaign-panel">
+          <div className="section-title">
+            <h2>Campaign readiness</h2>
+            <Badge>{campaigns.length} assigned</Badge>
+          </div>
+          {campaigns.length > 0 ? (
+            <div className="campaign-strip">
+              {campaigns.map((campaign) => (
+                <div className="campaign-strip-item" key={campaign.id}>
+                  <div>
+                    <strong>{campaign.name}</strong>
+                    <p className="muted">
+                      {campaign.team ?? "Team TBC"} - {campaign.location ?? "Location TBC"}
+                    </p>
+                  </div>
+                  <Badge tone={campaign.status === "active" ? "accent" : "ok"}>
+                    {campaign.memberStatus}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No campaign assignments yet.</p>
+          )}
           <div className="note-box">
             {missing.length > 0
-              ? `What am I missing? ${missing.map((field) => field.label).join(", ")}.`
-              : "What am I missing? Nothing required right now."}
+              ? `Next best step: update ${missing[0]?.label.toLowerCase()} so admin can clear your readiness.`
+              : "You're clear on required profile fields. Watch for campaign-specific requests from admin."}
           </div>
         </section>
       </div>
-      <section className="card stack">
-        <h2>Campaigns</h2>
-        {campaigns.length > 0 ? (
-          <div className="table-wrap">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Campaign</th>
-                  <th>Team</th>
-                  <th>Status</th>
-                  <th>Member status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {campaigns.map((campaign) => (
-                  <tr key={campaign.id}>
-                    <td>{campaign.name}</td>
-                    <td>{campaign.team ?? "Unassigned"}</td>
-                    <td>{campaign.status}</td>
-                    <td>{campaign.memberStatus}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="muted">No campaign assignments yet.</p>
-        )}
-      </section>
     </>
   );
 }
@@ -802,48 +840,190 @@ function PlayerCampaignPage() {
 
 function AdminDashboard() {
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [rows, setRows] = useState<CampaignReadinessEntry[]>([]);
+  const [requests, setRequests] = useState<ChangeRequestView[]>([]);
 
   useEffect(() => {
-    void api.getAdminStats().then(setStats);
+    void Promise.all([api.getAdminStats(), api.listCampaigns(), api.listChangeRequests()]).then(
+      async ([nextStats, campaigns, nextRequests]) => {
+        const primaryCampaign =
+          campaigns.find((nextCampaign) => nextCampaign.status === "active") ??
+          campaigns[0] ??
+          null;
+        setStats(nextStats);
+        setCampaign(primaryCampaign);
+        setRequests(nextRequests);
+        setRows(primaryCampaign ? await api.getCampaignReadiness(primaryCampaign.id) : []);
+      },
+    );
   }, []);
 
-  const items = [
-    ["Total athletes", stats?.totalAthletes ?? 0, "neutral", "Across the CRM"],
-    ["Active campaigns", stats?.activeCampaigns ?? 0, "accent", "Currently in motion"],
-    ["Incomplete profiles", stats?.incompleteProfiles ?? 0, "warn", "Need player follow-up"],
-    ["Passport expiring soon", stats?.passportExpiringSoon ?? 0, "danger", "Travel attention"],
-    ["Pending evaluations", stats?.pendingEvaluations ?? 0, "warn", "Coach input outstanding"],
-    ["Pending review items", stats?.pendingReviewItems ?? 0, "accent", "Admin triage queue"],
-  ] as const;
+  const totalPlayers = rows.length;
+  const chaseRows = rows.filter((row) => row.missingFields.length > 0);
+  const blockedRows = rows.filter(
+    (row) =>
+      row.missingFields.length > 0 ||
+      row.passportStatus === "expired" ||
+      row.passportStatus === "missing",
+  );
+  const passportRiskRows = rows.filter((row) => row.passportStatus !== "ok");
+  const consentRiskRows = rows.filter((row) =>
+    row.missingFields.some((field) => field.field === "data_sharing_consent"),
+  );
+  const pendingEvaluationRows = rows.filter((row) => row.evaluationStatus !== "submitted");
+  const readyRows = rows.filter(
+    (row) => row.missingFields.length === 0 && row.passportStatus === "ok",
+  );
+  const readyPercent = totalPlayers > 0 ? Math.round((readyRows.length / totalPlayers) * 100) : 0;
+  const pendingRequests = pendingReviewRequests(requests);
 
   return (
     <>
       <PageHead
         title="Admin Dashboard"
-        subtitle="Operational overview for campaign readiness."
-        eyebrow="Admin command center"
+        subtitle="What needs attention before this squad can travel, compete, and be submitted."
+        eyebrow="Readiness control room"
         actions={
           <>
             <Link className="btn" to="/admin/review">
               Review queue
             </Link>
-            <Link className="btn primary" to="/admin/campaigns">
-              Campaigns
+            <Link
+              className="btn primary"
+              to={campaign ? `/admin/campaigns/${campaign.id}` : "/admin/campaigns"}
+            >
+              Open campaign
             </Link>
           </>
         }
       />
-      <div className="grid cols-3">
-        {items.map(([label, value, tone, detail]) => (
-          <StatCard key={label} label={label} value={value} tone={tone} detail={detail} />
-        ))}
-      </div>
-      <section className="card stack assistant-card">
-        <h2>Assistant</h2>
-        <p className="note-box">
-          Who is incomplete? Start with the players table and campaign readiness view.
-        </p>
+      <section className="card control-room stack">
+        <div className="control-room-head">
+          <div>
+            <p className="eyebrow">Primary campaign</p>
+            <h2>{campaign?.name ?? "No active campaign"}</h2>
+            <p className="muted">
+              {campaign
+                ? `${campaign.team ?? "Team TBC"} - ${campaign.location ?? "Location TBC"}`
+                : "Create or activate a campaign to start tracking readiness."}
+            </p>
+          </div>
+          <div className="readiness-score">
+            <strong>
+              {readyRows.length}/{totalPlayers || 0}
+            </strong>
+            <span>players travel-ready</span>
+          </div>
+        </div>
+        <div className="progress" aria-label={`Campaign readiness ${readyPercent}%`}>
+          <span style={{ width: `${readyPercent}%` }} />
+        </div>
+        <div className="ops-metrics">
+          <div>
+            <strong>{readyRows.length}</strong>
+            <span>Ready</span>
+          </div>
+          <div>
+            <strong>{blockedRows.length}</strong>
+            <span>Blocked</span>
+          </div>
+          <div>
+            <strong>{chaseRows.length}</strong>
+            <span>Needs chase</span>
+          </div>
+          <div>
+            <strong>{passportRiskRows.length + consentRiskRows.length}</strong>
+            <span>Passport / consent risk</span>
+          </div>
+          <div>
+            <strong>{pendingEvaluationRows.length}</strong>
+            <span>Evaluations pending</span>
+          </div>
+        </div>
+        <div className="ops-lanes">
+          <section className="ops-lane">
+            <div className="section-title">
+              <h3>Needs chase</h3>
+              <Badge tone={chaseRows.length === 0 ? "ok" : "warn"}>{chaseRows.length}</Badge>
+            </div>
+            {chaseRows.length > 0 ? (
+              <ul className="compact-list">
+                {chaseRows.slice(0, 3).map((row) => (
+                  <li key={row.athleteId}>
+                    <strong>{row.name}</strong>
+                    <span>{row.missingFields.map((field) => field.label).join(", ")}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">No player profile chases needed.</p>
+            )}
+          </section>
+          <section className="ops-lane">
+            <div className="section-title">
+              <h3>Risk checks</h3>
+              <Badge
+                tone={passportRiskRows.length + consentRiskRows.length === 0 ? "ok" : "danger"}
+              >
+                {passportRiskRows.length + consentRiskRows.length}
+              </Badge>
+            </div>
+            <ul className="compact-list">
+              <li>
+                <strong>{passportRiskRows.length}</strong>
+                <span>passport records need attention</span>
+              </li>
+              <li>
+                <strong>{consentRiskRows.length}</strong>
+                <span>players missing data-sharing consent</span>
+              </li>
+            </ul>
+          </section>
+          <section className="ops-lane">
+            <div className="section-title">
+              <h3>Next admin actions</h3>
+              <Badge>ops</Badge>
+            </div>
+            <div className="action-list">
+              <Link to={campaign ? `/admin/campaigns/${campaign.id}` : "/admin/campaigns"}>
+                Draft reminders for {chaseRows.length} incomplete player
+                {chaseRows.length === 1 ? "" : "s"}
+              </Link>
+              <Link to="/admin/review">
+                Review {pendingRequests.length} pending profile change
+                {pendingRequests.length === 1 ? "" : "s"}
+              </Link>
+              <Link to="/admin/exports">Check export readiness after risks are cleared</Link>
+            </div>
+          </section>
+        </div>
       </section>
+      <div className="ops-footer-grid">
+        <section className="card stack">
+          <div className="section-title">
+            <h2>Review lanes</h2>
+            <Badge tone={pendingRequests.length === 0 ? "ok" : "warn"}>
+              {pendingRequests.length} pending
+            </Badge>
+          </div>
+          <p className="muted">
+            Profile updates stay human-reviewed. Assistant drafts do not approve or send anything.
+          </p>
+        </section>
+        <section className="card stack">
+          <div className="section-title">
+            <h2>Submission pressure</h2>
+            <Badge tone={(stats?.pendingEvaluations ?? 0) === 0 ? "ok" : "warn"}>
+              {stats?.pendingEvaluations ?? pendingEvaluationRows.length} pending
+            </Badge>
+          </div>
+          <p className="muted">
+            Coach evaluations are tracked separately so admin can see when the squad file is ready
+            to export.
+          </p>
+        </section>
+      </div>
     </>
   );
 }
