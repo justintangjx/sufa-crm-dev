@@ -41,6 +41,12 @@ interface ChatCompletionResponse {
 
 type ResponseFormatMode = "json_schema" | "json_object";
 
+interface RequestProfile {
+  format: ResponseFormatMode;
+  includeReasoning?: boolean;
+  responseHealing?: boolean;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -143,6 +149,33 @@ function parseProviderDraft(message: ChatCompletionMessage | undefined): CoachNo
   throw new Error("provider_json_parse_failed");
 }
 
+function requestProfiles(apiUrl: string): RequestProfile[] {
+  const profiles: RequestProfile[] = [
+    { format: "json_schema" },
+    { format: "json_object" },
+  ];
+  if (!isOpenRouterApi(apiUrl)) {
+    return profiles;
+  }
+  return [
+    { format: "json_schema" },
+    { format: "json_schema", includeReasoning: false },
+    { format: "json_object", includeReasoning: false, responseHealing: true },
+  ];
+}
+
+function isRetryableProviderError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return (
+    error.message === "provider_json_parse_failed" ||
+    error.message === "provider_empty_response" ||
+    error.message === "provider_http_400" ||
+    error.message === "provider_http_422"
+  );
+}
+
 export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
   provider = "openai-compatible";
 
@@ -156,7 +189,7 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
     notes: string,
     repairErrors: string[],
     options: { section?: string; action?: string },
-    format: ResponseFormatMode,
+    profile: RequestProfile,
   ): Record<string, unknown> {
     const body: Record<string, unknown> = {
       model: this.model,
@@ -171,7 +204,7 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
       ],
     };
 
-    if (format === "json_schema") {
+    if (profile.format === "json_schema") {
       body.response_format = {
         type: "json_schema",
         json_schema: {
@@ -184,11 +217,10 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
       body.response_format = { type: "json_object" };
     }
 
-    if (isOpenRouterApi(this.apiUrl)) {
-      // Reasoning models (e.g. gpt-oss-120b:free) otherwise return prose in `reasoning`
-      // with empty/non-JSON `content`, which breaks structured coach-note parsing.
+    if (profile.includeReasoning === false) {
       body.include_reasoning = false;
-      body.reasoning = { effort: "none", exclude: true };
+    }
+    if (profile.responseHealing) {
       body.plugins = [{ id: "response-healing" }];
     }
 
@@ -200,7 +232,7 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
     repairErrors: string[],
     signal: AbortSignal,
     options: { section?: string; action?: string },
-    format: ResponseFormatMode,
+    profile: RequestProfile,
   ): Promise<ProviderResult> {
     const response = await fetch(this.apiUrl, {
       method: "POST",
@@ -208,13 +240,23 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(this.buildRequestBody(notes, repairErrors, options, format)),
+      body: JSON.stringify(this.buildRequestBody(notes, repairErrors, options, profile)),
       signal,
     });
 
     if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(
+        "provider_http_error",
+        JSON.stringify({
+          status: response.status,
+          profile,
+          body: errorBody.slice(0, 500),
+        }),
+      );
       throw new Error(`provider_http_${response.status}`);
     }
+
     const body = (await response.json()) as ChatCompletionResponse;
     const draft = parseProviderDraft(body.choices?.[0]?.message);
     return {
@@ -232,19 +274,15 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
     signal: AbortSignal,
     options: { section?: string; action?: string } = {},
   ): Promise<ProviderResult> {
-    const formats: ResponseFormatMode[] = ["json_schema", "json_object"];
+    const profiles = requestProfiles(this.apiUrl);
     let lastError: unknown = new Error("provider_json_parse_failed");
 
-    for (const format of formats) {
+    for (const profile of profiles) {
       try {
-        return await this.requestOnce(notes, repairErrors, signal, options, format);
+        return await this.requestOnce(notes, repairErrors, signal, options, profile);
       } catch (error) {
         lastError = error;
-        const retryable =
-          error instanceof Error &&
-          (error.message === "provider_json_parse_failed" ||
-            error.message === "provider_empty_response");
-        if (!retryable || format === "json_object") {
+        if (!isRetryableProviderError(error) || profile === profiles[profiles.length - 1]) {
           throw error;
         }
       }
