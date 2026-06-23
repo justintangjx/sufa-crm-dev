@@ -213,7 +213,8 @@ Deno.serve(async (request) => {
       .select("id")
       .single();
     if (sessionError || !createdSession) {
-      return json(500, { error: "session_write_failed" });
+      console.error("coach_note_sessions_insert", sessionError);
+      return json(500, { error: "session_write_failed", code: sessionError?.code });
     }
     activeSessionId = createdSession.id;
     turnIndex = 0;
