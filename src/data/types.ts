@@ -53,6 +53,12 @@ export interface CampaignWithMembership extends Campaign {
   memberStatus: CampaignMemberStatus;
 }
 
+export interface CampaignMemberAssignment {
+  campaignId: string;
+  athleteId: string;
+  status: CampaignMemberStatus;
+}
+
 export interface NewCampaign {
   name: string;
   team?: string;
@@ -167,6 +173,7 @@ export interface Api {
   listCampaigns(): Promise<Campaign[]>;
   getCampaign(id: string): Promise<Campaign | null>;
   createCampaign(input: NewCampaign, createdBy: string): Promise<Campaign>;
+  assignCampaignMember(input: CampaignMemberAssignment): Promise<void>;
   getCampaignReadiness(campaignId: string): Promise<CampaignReadinessEntry[]>;
   listChangeRequests(): Promise<ChangeRequestView[]>;
   reviewChangeRequest(

@@ -177,6 +177,45 @@ describe("App routing", () => {
     expect(drafts[0]?.content).toContain("Passport expiry");
   });
 
+  it("lets an admin create a campaign from the campaign workspace", async () => {
+    const user = userEvent.setup();
+    await api.signIn("admin@sufa.test");
+
+    render(<TestApp initialEntries={["/admin/campaigns"]} />);
+
+    expect(await screen.findByRole("heading", { name: /campaigns/i })).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/campaign name/i), "Worlds 2027");
+    await user.type(screen.getByLabelText(/^team$/i), "Mixed");
+    await user.type(screen.getByLabelText(/start date/i), "2027-07-01");
+    await user.type(screen.getByLabelText(/end date/i), "2027-07-08");
+    await user.type(screen.getByLabelText(/location/i), "Perth");
+    await user.selectOptions(screen.getByLabelText(/campaign status/i), "active");
+    await user.click(screen.getByRole("button", { name: /create campaign/i }));
+
+    expect(await screen.findByText(/Worlds 2027 created/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /worlds 2027/i })).toBeInTheDocument();
+
+    const campaigns = await api.listCampaigns();
+    expect(campaigns.some((campaign) => campaign.name === "Worlds 2027")).toBe(true);
+  });
+
+  it("lets an admin assign Derrick to a campaign from campaign detail", async () => {
+    const user = userEvent.setup();
+    await api.signIn("admin@sufa.test");
+
+    render(<TestApp initialEntries={["/admin/campaigns/c-sea"]} />);
+
+    expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText(/player/i), "a-derrick");
+    await user.selectOptions(screen.getByLabelText(/assignment status/i), "registered");
+    await user.click(screen.getByRole("button", { name: /assign player/i }));
+
+    expect(await screen.findByText(/Player assigned to SEA Games 2026/i)).toBeInTheDocument();
+
+    const flow = await api.getPlayerCampaignFlow("p-derrick", "c-sea");
+    expect(flow?.memberStatus).toBe("registered");
+  });
+
   it("lets an admin triage review queue risk without auto-approving changes", async () => {
     const user = userEvent.setup();
     await api.updateOwnAthlete("p-cara", { passport_expiry: "2031-03-01" });

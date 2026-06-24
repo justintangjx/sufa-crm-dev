@@ -273,6 +273,25 @@ export const mockApi: Api = {
     return campaign;
   },
 
+  async assignCampaignMember(input) {
+    const data = getData();
+    const existing = data.campaignMembers.find(
+      (member) => member.campaign_id === input.campaignId && member.athlete_id === input.athleteId,
+    );
+    if (existing) {
+      existing.status = input.status;
+    } else {
+      data.campaignMembers.push({
+        id: generateId("m"),
+        campaign_id: input.campaignId,
+        athlete_id: input.athleteId,
+        status: input.status,
+        created_at: now(),
+      });
+    }
+    saveData(data);
+  },
+
   async getCampaignReadiness(campaignId: string): Promise<CampaignReadinessEntry[]> {
     const data = getData();
     return data.campaignMembers

@@ -95,6 +95,15 @@ Mock backend seed users:
 - `cara@sufa.test`
 - `derrick@sufa.test` (blank player profile for form-completion demos)
 
+Player Growth Matrix demo:
+
+- In mock mode, use `Player (Alice - Matrix)` / `alice@sufa.test`, then open SEA
+  Games 2026 from the player dashboard. Alice has a shared `Q1 2026` matrix review
+  with two coach sign-offs and can submit a right-of-reply.
+- For Supabase-backed demos, create Auth users for `admin@sufa.test`,
+  `coach@sufa.test`, `coach2@sufa.test`, and `alice@sufa.test`, then run
+  `supabase/seed-player-growth-demo.sql` after applying migrations.
+
 ## Deployment
 
 Current deployment:

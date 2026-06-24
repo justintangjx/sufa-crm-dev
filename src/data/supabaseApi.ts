@@ -244,6 +244,20 @@ export const supabaseApi: Api = {
     return data as Campaign;
   },
 
+  async assignCampaignMember(input) {
+    const { error } = await client().from("campaign_members").upsert(
+      {
+        campaign_id: input.campaignId,
+        athlete_id: input.athleteId,
+        status: input.status,
+      },
+      { onConflict: "campaign_id,athlete_id" },
+    );
+    if (error) {
+      throw error;
+    }
+  },
+
   async getCampaignReadiness(campaignId: string): Promise<CampaignReadinessEntry[]> {
     const { data } = await client()
       .from("campaign_members")

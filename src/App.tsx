@@ -256,7 +256,7 @@ function AppLayout() {
 const demoAccounts = [
   { email: "admin@sufa.test", label: "Admin" },
   { email: "coach@sufa.test", label: "Coach" },
-  { email: "alice@sufa.test", label: "Player (Alice)" },
+  { email: "alice@sufa.test", label: "Player (Alice - Matrix)" },
   { email: "derrick@sufa.test", label: "Player (Derrick)" },
 ] as const;
 
@@ -1310,11 +1310,43 @@ function AdminPlayersPage() {
 }
 
 function AdminCampaignsPage() {
+  const { profile } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [form, setForm] = useState<CampaignFormState>(emptyCampaignForm);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const loadCampaigns = useCallback(async () => {
+    setCampaigns(await api.listCampaigns());
+  }, []);
 
   useEffect(() => {
-    void api.listCampaigns().then(setCampaigns);
-  }, []);
+    void loadCampaigns();
+  }, [loadCampaigns]);
+
+  function updateCampaignForm(field: keyof CampaignFormState, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleCreateCampaign(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!profile || form.name.trim().length === 0) {
+      return;
+    }
+    const campaign = await api.createCampaign(
+      {
+        name: form.name.trim(),
+        team: optionalText(form.team) ?? undefined,
+        start_date: optionalText(form.startDate) ?? undefined,
+        end_date: optionalText(form.endDate) ?? undefined,
+        location: optionalText(form.location) ?? undefined,
+        status: form.status,
+      },
+      profile.id,
+    );
+    setForm(emptyCampaignForm);
+    setMessage(`${campaign.name} created.`);
+    await loadCampaigns();
+  }
 
   return (
     <>
@@ -1323,6 +1355,65 @@ function AdminCampaignsPage() {
         subtitle="Campaign list and creation workspace."
         eyebrow="Admin"
       />
+      <section className="card stack">
+        <div className="section-title">
+          <h2>Create campaign</h2>
+          <Badge>admin</Badge>
+        </div>
+        <form className="stack" onSubmit={(event) => void handleCreateCampaign(event)}>
+          <div className="grid cols-2">
+            <TextField
+              label="Campaign name"
+              value={form.name}
+              onChange={(value) => updateCampaignForm("name", value)}
+              required
+            />
+            <TextField
+              label="Team"
+              value={form.team}
+              onChange={(value) => updateCampaignForm("team", value)}
+              placeholder="Open, Women, Mixed..."
+            />
+            <TextField
+              label="Start date"
+              type="date"
+              value={form.startDate}
+              onChange={(value) => updateCampaignForm("startDate", value)}
+            />
+            <TextField
+              label="End date"
+              type="date"
+              value={form.endDate}
+              onChange={(value) => updateCampaignForm("endDate", value)}
+            />
+            <TextField
+              label="Location"
+              value={form.location}
+              onChange={(value) => updateCampaignForm("location", value)}
+              placeholder="Singapore"
+            />
+            <div className="field">
+              <label htmlFor="campaign-status">Campaign status</label>
+              <select
+                id="campaign-status"
+                value={form.status}
+                onChange={(event) => updateCampaignForm("status", event.target.value)}
+              >
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+                <option value="completed">Completed</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+          </div>
+          <div className="btn-row">
+            <button type="submit" className="btn primary">
+              Create campaign
+            </button>
+          </div>
+          {message ? <p className="alert ok">{message}</p> : null}
+        </form>
+      </section>
       <section className="card table-wrap">
         <table className="data">
           <thead>
@@ -1351,11 +1442,33 @@ function AdminCampaignsPage() {
   );
 }
 
+interface CampaignFormState {
+  name: string;
+  team: string;
+  startDate: string;
+  endDate: string;
+  location: string;
+  status: Campaign["status"];
+}
+
+const emptyCampaignForm: CampaignFormState = {
+  name: "",
+  team: "",
+  startDate: "",
+  endDate: "",
+  location: "",
+  status: "draft",
+};
+
 function AdminCampaignDetailPage() {
   const { campaignId = "" } = useParams();
   const { profile } = useAuth();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [rows, setRows] = useState<CampaignReadinessEntry[]>([]);
+  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [assignment, setAssignment] = useState<CampaignAssignmentFormState>(
+    emptyCampaignAssignmentForm,
+  );
   const [drafts, setDrafts] = useState<AssistantDraft[]>([]);
   const [briefing, setBriefing] = useState<CampaignTryoutBriefing | null>(null);
   const [growthReviews, setGrowthReviews] = useState<GrowthReviewWithDetails[]>([]);
@@ -1375,15 +1488,21 @@ function AdminCampaignDetailPage() {
     setGrowthReviews(nextGrowthReviews);
   }, [campaignId]);
 
-  useEffect(() => {
-    void Promise.all([api.getCampaign(campaignId), api.getCampaignReadiness(campaignId)]).then(
-      ([nextCampaign, nextRows]) => {
-        setCampaign(nextCampaign);
-        setRows(nextRows);
-      },
-    );
+  const loadCampaignDetail = useCallback(async () => {
+    const [nextCampaign, nextRows, nextAthletes] = await Promise.all([
+      api.getCampaign(campaignId),
+      api.getCampaignReadiness(campaignId),
+      api.listAthletes(),
+    ]);
+    setCampaign(nextCampaign);
+    setRows(nextRows);
+    setAthletes(nextAthletes);
     void loadGrowthMatrixAdmin();
   }, [campaignId, loadGrowthMatrixAdmin]);
+
+  useEffect(() => {
+    void loadCampaignDetail();
+  }, [loadCampaignDetail]);
 
   useEffect(() => {
     if (!profile) {
@@ -1399,6 +1518,15 @@ function AdminCampaignDetailPage() {
     (row) => row.passportStatus === "expired" || row.passportStatus === "expiring_soon",
   );
   const pendingEvaluations = rows.filter((row) => row.evaluationStatus !== "submitted");
+  const assignedAthleteIds = new Set(rows.map((row) => row.athleteId));
+  const unassignedAthletes = athletes.filter((athlete) => !assignedAthleteIds.has(athlete.id));
+
+  useEffect(() => {
+    if (assignment.athleteId || unassignedAthletes.length === 0) {
+      return;
+    }
+    setAssignment((current) => ({ ...current, athleteId: unassignedAthletes[0]?.id ?? "" }));
+  }, [assignment.athleteId, unassignedAthletes]);
 
   function handleWhoIsIncomplete() {
     setAssistantResponse(buildIncompletePlayersAnswer(rows));
@@ -1474,6 +1602,25 @@ function AdminCampaignDetailPage() {
     await loadGrowthMatrixAdmin();
   }
 
+  async function handleAssignPlayer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!assignment.athleteId) {
+      setMessage("Select a player before assigning.");
+      return;
+    }
+    await api.assignCampaignMember({
+      campaignId,
+      athleteId: assignment.athleteId,
+      status: assignment.status,
+    });
+    const assigned = athletes.find((athlete) => athlete.id === assignment.athleteId);
+    setMessage(
+      `${assigned?.preferred_name || assigned?.legal_name || "Player"} assigned to ${campaign?.name ?? "campaign"}.`,
+    );
+    setAssignment(emptyCampaignAssignmentForm);
+    await loadCampaignDetail();
+  }
+
   return (
     <>
       <PageHead
@@ -1512,6 +1659,66 @@ function AdminCampaignDetailPage() {
           </div>
         </div>
         {message ? <p className="alert ok">{message}</p> : null}
+      </section>
+      <section className="card stack">
+        <div className="section-title">
+          <h2>Assign players</h2>
+          <Badge>{unassignedAthletes.length} available</Badge>
+        </div>
+        {unassignedAthletes.length > 0 ? (
+          <form
+            className="grid cols-3 assignment-form"
+            onSubmit={(event) => void handleAssignPlayer(event)}
+          >
+            <div className="field">
+              <label htmlFor="assign-player">Player</label>
+              <select
+                id="assign-player"
+                value={assignment.athleteId}
+                onChange={(event) =>
+                  setAssignment((current) => ({ ...current, athleteId: event.target.value }))
+                }
+              >
+                {unassignedAthletes.map((athlete) => (
+                  <option key={athlete.id} value={athlete.id}>
+                    {athlete.preferred_name || athlete.legal_name || "Unnamed player"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="assign-status">Assignment status</label>
+              <select
+                id="assign-status"
+                value={assignment.status}
+                onChange={(event) =>
+                  setAssignment((current) => ({
+                    ...current,
+                    status: event.target.value as CampaignAssignmentFormState["status"],
+                  }))
+                }
+              >
+                <option value="invited">Invited</option>
+                <option value="registered">Registered</option>
+                <option value="selected">Selected</option>
+                <option value="reserve">Reserve</option>
+                <option value="withdrawn">Withdrawn</option>
+              </select>
+            </div>
+            <div className="field field-action">
+              <label aria-hidden="true">&nbsp;</label>
+              <button type="submit" className="btn primary">
+                Assign player
+              </button>
+            </div>
+          </form>
+        ) : (
+          <p className="muted">All athletes are already assigned to this campaign.</p>
+        )}
+        <p className="muted">
+          Assigned players can see the campaign from their player dashboard. Coach evaluations and
+          Growth Matrix drafts remain hidden until the correct review/share steps happen.
+        </p>
       </section>
       {enablePlayerGrowthMatrix ? (
         <AdminGrowthMatrixPanel
@@ -1630,6 +1837,16 @@ function buildIncompletePlayersAnswer(rows: readonly CampaignReadinessEntry[]): 
 
   return lines.join("\n");
 }
+
+interface CampaignAssignmentFormState {
+  athleteId: string;
+  status: CampaignWithMembership["memberStatus"];
+}
+
+const emptyCampaignAssignmentForm: CampaignAssignmentFormState = {
+  athleteId: "",
+  status: "registered",
+};
 
 function AdminGrowthMatrixPanel({
   briefing,
