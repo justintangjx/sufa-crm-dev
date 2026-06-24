@@ -224,7 +224,9 @@ function normalizeEvidenceItem(item: unknown, sourceNotes: string): EvidenceItem
   const quotesRaw = item.evidenceQuotes ?? item.evidence_quotes ?? item.quotes ?? item.evidence;
   let draftText = typeof draftTextRaw === "string" ? draftTextRaw.trim() : "";
   let evidenceQuotes = Array.isArray(quotesRaw)
-    ? quotesRaw.filter((quote): quote is string => typeof quote === "string" && quote.trim().length > 0)
+    ? quotesRaw.filter(
+        (quote): quote is string => typeof quote === "string" && quote.trim().length > 0,
+      )
     : [];
   if (!draftText && evidenceQuotes.length > 0) {
     draftText = evidenceQuotes[0]!.trim();
@@ -292,7 +294,7 @@ function normalizeAmbiguityArray(value: unknown, sourceNotes: string): CoachNote
     .filter((item): item is CoachNoteAmbiguity => item !== null);
 }
 
-function coerceSchemaVersion(value: unknown): number {
+function coerceSchemaVersion(value: unknown): typeof SCHEMA_VERSION {
   if (value === SCHEMA_VERSION || value === String(SCHEMA_VERSION)) {
     return SCHEMA_VERSION;
   }

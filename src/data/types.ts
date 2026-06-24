@@ -5,11 +5,15 @@ import type {
   AssistantDraftType,
   Athlete,
   Campaign,
+  CampaignTryoutBriefing,
   CampaignMemberStatus,
   CampaignStatus,
   CoachAthleteView,
   CoachEvaluation,
   EvaluationStatus,
+  PlayerGrowthReply,
+  PlayerGrowthReview,
+  PlayerGrowthSignoff,
   Profile,
   Recommendation,
 } from "../types/database";
@@ -93,6 +97,43 @@ export interface NewAssistantDraft {
   content: string;
 }
 
+export interface GrowthReviewWithDetails extends PlayerGrowthReview {
+  athleteName: string;
+  signoffs: PlayerGrowthSignoff[];
+  replies: PlayerGrowthReply[];
+}
+
+export interface PlayerCampaignFlow {
+  campaign: Campaign;
+  memberStatus: CampaignMemberStatus;
+  briefing: CampaignTryoutBriefing | null;
+  reviews: GrowthReviewWithDetails[];
+}
+
+export interface TryoutBriefingInput {
+  campaignId: string;
+  headCoach?: string | null;
+  selectors?: string | null;
+  welfareCommittee?: string | null;
+  liaison?: string | null;
+  trainingSchedule?: string | null;
+  campsSchedule?: string | null;
+  competitionsSchedule?: string | null;
+  timeCommitment?: string | null;
+  published: boolean;
+}
+
+export interface GrowthReviewInput {
+  id?: string;
+  campaignId: string;
+  athleteId: string;
+  coachProfileId: string;
+  quarterLabel: string;
+  skillScore: number;
+  growthPotentialScore: number;
+  rationale: string;
+}
+
 export interface EvaluationInput {
   id?: string;
   campaignId: string;
@@ -135,6 +176,26 @@ export interface Api {
   ): Promise<void>;
   listAssistantDrafts(createdBy: string): Promise<AssistantDraft[]>;
   createAssistantDraft(input: NewAssistantDraft): Promise<AssistantDraft>;
+
+  getTryoutBriefing(campaignId: string): Promise<CampaignTryoutBriefing | null>;
+  saveTryoutBriefing(
+    input: TryoutBriefingInput,
+    updatedBy: string,
+  ): Promise<CampaignTryoutBriefing>;
+  getPlayerCampaignFlow(profileId: string, campaignId: string): Promise<PlayerCampaignFlow | null>;
+  getCampaignGrowthReviews(campaignId: string): Promise<GrowthReviewWithDetails[]>;
+  getCoachGrowthReviews(
+    campaignId: string,
+    coachProfileId: string,
+  ): Promise<GrowthReviewWithDetails[]>;
+  saveGrowthReviewDraft(input: GrowthReviewInput): Promise<GrowthReviewWithDetails>;
+  signGrowthReview(reviewId: string, coachProfileId: string): Promise<GrowthReviewWithDetails>;
+  shareGrowthReview(reviewId: string, adminProfileId: string): Promise<GrowthReviewWithDetails>;
+  submitGrowthReply(
+    reviewId: string,
+    athleteProfileId: string,
+    body: string,
+  ): Promise<PlayerGrowthReply>;
 
   getCoachCampaigns(coachProfileId: string): Promise<Campaign[]>;
   getCoachAthletes(campaignId: string): Promise<CoachAthleteView[]>;

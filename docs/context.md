@@ -82,6 +82,9 @@ The app chooses a backend in `src/data/index.ts`.
   production-safe behaviour. Example: `VITE_ENABLE_COACH_LLM=false` keeps coach note
   structuring on the local deterministic path until the Edge Function and model secrets
   are deployed.
+- `VITE_ENABLE_PLAYER_GROWTH_MATRIX=false` keeps the audited Growth Matrix workflow off
+  on Supabase-backed deployments until the `player_growth_matrix` migration has been
+  applied. Mock mode enables the flow for local demos/tests.
 
 Mock backend seed users:
 
@@ -90,6 +93,7 @@ Mock backend seed users:
 - `alice@sufa.test`
 - `ben@sufa.test`
 - `cara@sufa.test`
+- `derrick@sufa.test` (blank player profile for form-completion demos)
 
 ## Deployment
 
@@ -158,6 +162,7 @@ For a real Supabase-auth demo, use deliverable aliases such as:
 - `yourname+alice@gmail.com`
 - `yourname+ben@gmail.com`
 - `yourname+cara@gmail.com`
+- `yourname+derrick@gmail.com`
 
 Then map those users to the desired roles and seed data in `public.profiles`,
 `public.athletes`, campaigns, members, coaches, and change requests.

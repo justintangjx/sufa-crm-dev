@@ -141,7 +141,8 @@ function parseProviderDraft(message: ChatCompletionMessage | undefined): CoachNo
   console.error(
     "provider_json_parse_failed",
     JSON.stringify({
-      hasContent: typeof message.content === "string" ? message.content.slice(0, 120) : message.content,
+      hasContent:
+        typeof message.content === "string" ? message.content.slice(0, 120) : message.content,
       hasReasoning: typeof message.reasoning === "string" ? message.reasoning.slice(0, 120) : null,
       reasoningDetailCount: message.reasoning_details?.length ?? 0,
     }),
@@ -168,10 +169,7 @@ function requestProfiles(apiUrl: string, model: string): RequestProfile[] {
     ];
   }
 
-  return [
-    { format: "json_schema" },
-    { format: "json_object" },
-  ];
+  return [{ format: "json_schema" }, { format: "json_object" }];
 }
 
 function isRetryableProviderError(error: unknown): boolean {
@@ -211,10 +209,13 @@ export class OpenAiCompatibleCoachNoteGenerator implements CoachNoteGenerator {
           content:
             "You structure coach notes into evidence-grounded JSON. You never make ratings or selection decisions.",
         },
-        { role: "user", content: buildCoachNotePrompt(notes, repairErrors, {
-          ...options,
-          includeSchema: profile.format === "json_object",
-        }) },
+        {
+          role: "user",
+          content: buildCoachNotePrompt(notes, repairErrors, {
+            ...options,
+            includeSchema: profile.format === "json_object",
+          }),
+        },
       ],
     };
 

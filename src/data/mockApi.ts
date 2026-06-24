@@ -1,5 +1,10 @@
 // In-memory implementation of the data Api. Used offline (dev + tests).
 import { getMissingAthleteFields } from "../lib/profile";
+import {
+  calculateMatrixQuadrant,
+  hasTwoCoachSignoff,
+  nextGrowthReviewStatus,
+} from "../lib/playerGrowth";
 import { getPassportStatus } from "../lib/passport";
 import { clearDemoCoachSession } from "../lib/demoCoachLlm";
 import { demoCoachLlm, useRemoteCoachLlm } from "../lib/env";
@@ -15,9 +20,12 @@ import type {
   AssistantDraft,
   Athlete,
   Campaign,
+  CampaignTryoutBriefing,
   ChangeRequest,
   CoachAthleteView,
   CoachEvaluation,
+  PlayerGrowthReply,
+  PlayerGrowthReview,
   PriorCoachEvaluation,
 } from "../types/database";
 import type {
@@ -28,9 +36,12 @@ import type {
   CampaignWithMembership,
   ChangeRequestView,
   EvaluationInput,
+  GrowthReviewInput,
+  GrowthReviewWithDetails,
   NewAssistantDraft,
   NewCampaign,
   SignInResult,
+  TryoutBriefingInput,
 } from "./types";
 import { generateId, getCurrentUserId, getData, saveData, setCurrentUserId } from "./store";
 
@@ -46,8 +57,30 @@ function findAthlete(athleteId: string): Athlete | undefined {
   return getData().athletes.find((a) => a.id === athleteId);
 }
 
+function findProfile(profileId: string) {
+  return getData().profiles.find((profile) => profile.id === profileId);
+}
+
 function findCampaignName(campaignId: string): string {
   return getData().campaigns.find((campaign) => campaign.id === campaignId)?.name ?? campaignId;
+}
+
+function isAssignedCoach(campaignId: string, coachProfileId: string): boolean {
+  return getData().campaignCoaches.some(
+    (coach) => coach.campaign_id === campaignId && coach.coach_profile_id === coachProfileId,
+  );
+}
+
+function assertAssignedCoach(campaignId: string, coachProfileId: string) {
+  if (!isAssignedCoach(campaignId, coachProfileId)) {
+    throw new Error("Coach is not assigned to this campaign");
+  }
+}
+
+function assertAdmin(profileId: string) {
+  if (findProfile(profileId)?.role !== "admin") {
+    throw new Error("Admin access required");
+  }
 }
 
 function latestEvaluation(campaignId: string, athleteId: string): CoachEvaluation | null {
@@ -55,6 +88,53 @@ function latestEvaluation(campaignId: string, athleteId: string): CoachEvaluatio
     (e) => e.campaign_id === campaignId && e.athlete_id === athleteId,
   );
   return matches.length > 0 ? matches[matches.length - 1] : null;
+}
+
+function growthReviewDetails(review: PlayerGrowthReview): GrowthReviewWithDetails {
+  const data = getData();
+  const athlete = findAthlete(review.athlete_id);
+  return {
+    ...review,
+    athleteName: athlete ? displayName(athlete) : "Unknown athlete",
+    signoffs: data.growthSignoffs.filter((signoff) => signoff.review_id === review.id),
+    replies: data.growthReplies.filter((reply) => reply.review_id === review.id),
+  };
+}
+
+function findGrowthReview(reviewId: string): PlayerGrowthReview {
+  const review = getData().growthReviews.find((row) => row.id === reviewId);
+  if (!review) {
+    throw new Error("Growth review not found");
+  }
+  return review;
+}
+
+function publishedPlayerGrowthStatuses(status: PlayerGrowthReview["status"]): boolean {
+  return status === "shared" || status === "disputed" || status === "closed";
+}
+
+function briefingPayload(
+  input: TryoutBriefingInput,
+  updatedBy: string,
+  existing?: CampaignTryoutBriefing,
+): CampaignTryoutBriefing {
+  const timestamp = now();
+  return {
+    id: existing?.id ?? generateId("tb"),
+    campaign_id: input.campaignId,
+    head_coach: input.headCoach ?? null,
+    selectors: input.selectors ?? null,
+    welfare_committee: input.welfareCommittee ?? null,
+    liaison: input.liaison ?? null,
+    training_schedule: input.trainingSchedule ?? null,
+    camps_schedule: input.campsSchedule ?? null,
+    competitions_schedule: input.competitionsSchedule ?? null,
+    time_commitment: input.timeCommitment ?? null,
+    published: input.published,
+    updated_by: updatedBy,
+    created_at: existing?.created_at ?? timestamp,
+    updated_at: timestamp,
+  };
 }
 
 export const mockApi: Api = {
@@ -266,6 +346,179 @@ export const mockApi: Api = {
     data.assistantDrafts.push(draft);
     saveData(data);
     return draft;
+  },
+
+  async getTryoutBriefing(campaignId: string) {
+    return (
+      getData().tryoutBriefings.find((briefing) => briefing.campaign_id === campaignId) ?? null
+    );
+  },
+
+  async saveTryoutBriefing(input: TryoutBriefingInput, updatedBy: string) {
+    assertAdmin(updatedBy);
+    const data = getData();
+    const existing = data.tryoutBriefings.find(
+      (briefing) => briefing.campaign_id === input.campaignId,
+    );
+    const next = briefingPayload(input, updatedBy, existing);
+    if (existing) {
+      Object.assign(existing, next);
+    } else {
+      data.tryoutBriefings.push(next);
+    }
+    saveData(data);
+    return next;
+  },
+
+  async getPlayerCampaignFlow(profileId: string, campaignId: string) {
+    const data = getData();
+    const athlete = data.athletes.find((row) => row.profile_id === profileId);
+    if (!athlete) {
+      return null;
+    }
+    const membership = data.campaignMembers.find(
+      (row) => row.campaign_id === campaignId && row.athlete_id === athlete.id,
+    );
+    const campaign = data.campaigns.find((row) => row.id === campaignId);
+    if (!membership || !campaign) {
+      return null;
+    }
+    return {
+      campaign,
+      memberStatus: membership.status,
+      briefing:
+        data.tryoutBriefings.find(
+          (briefing) => briefing.campaign_id === campaignId && briefing.published,
+        ) ?? null,
+      reviews: data.growthReviews
+        .filter(
+          (review) =>
+            review.campaign_id === campaignId &&
+            review.athlete_id === athlete.id &&
+            publishedPlayerGrowthStatuses(review.status),
+        )
+        .toSorted((left, right) => right.updated_at.localeCompare(left.updated_at))
+        .map(growthReviewDetails),
+    };
+  },
+
+  async getCampaignGrowthReviews(campaignId: string) {
+    return getData()
+      .growthReviews.filter((review) => review.campaign_id === campaignId)
+      .toSorted((left, right) => right.updated_at.localeCompare(left.updated_at))
+      .map(growthReviewDetails);
+  },
+
+  async getCoachGrowthReviews(campaignId: string, coachProfileId: string) {
+    assertAssignedCoach(campaignId, coachProfileId);
+    return getData()
+      .growthReviews.filter((review) => review.campaign_id === campaignId)
+      .toSorted((left, right) => right.updated_at.localeCompare(left.updated_at))
+      .map(growthReviewDetails);
+  },
+
+  async saveGrowthReviewDraft(input: GrowthReviewInput) {
+    assertAssignedCoach(input.campaignId, input.coachProfileId);
+    const data = getData();
+    const timestamp = now();
+    const existing = input.id
+      ? data.growthReviews.find((review) => review.id === input.id)
+      : data.growthReviews.find(
+          (review) =>
+            review.campaign_id === input.campaignId &&
+            review.athlete_id === input.athleteId &&
+            review.quarter_label === input.quarterLabel,
+        );
+    if (existing && publishedPlayerGrowthStatuses(existing.status)) {
+      throw new Error("Shared growth reviews cannot be edited by coaches");
+    }
+    const review: PlayerGrowthReview = {
+      id: existing?.id ?? generateId("gr"),
+      campaign_id: input.campaignId,
+      athlete_id: input.athleteId,
+      quarter_label: input.quarterLabel.trim(),
+      skill_score: input.skillScore,
+      growth_potential_score: input.growthPotentialScore,
+      quadrant: calculateMatrixQuadrant(input.skillScore, input.growthPotentialScore),
+      rationale: input.rationale.trim(),
+      status: existing?.status ?? "draft",
+      created_by: existing?.created_by ?? input.coachProfileId,
+      shared_at: existing?.shared_at ?? null,
+      created_at: existing?.created_at ?? timestamp,
+      updated_at: timestamp,
+    };
+    if (existing) {
+      Object.assign(existing, review);
+    } else {
+      data.growthReviews.push(review);
+    }
+    saveData(data);
+    return growthReviewDetails(review);
+  },
+
+  async signGrowthReview(reviewId: string, coachProfileId: string) {
+    const data = getData();
+    const review = findGrowthReview(reviewId);
+    assertAssignedCoach(review.campaign_id, coachProfileId);
+    if (
+      !data.growthSignoffs.some(
+        (signoff) => signoff.review_id === reviewId && signoff.coach_profile_id === coachProfileId,
+      )
+    ) {
+      data.growthSignoffs.push({
+        id: generateId("gs"),
+        review_id: reviewId,
+        coach_profile_id: coachProfileId,
+        signed_at: now(),
+      });
+    }
+    const signoffs = data.growthSignoffs.filter((signoff) => signoff.review_id === reviewId);
+    review.status = nextGrowthReviewStatus(review, signoffs);
+    review.updated_at = now();
+    saveData(data);
+    return growthReviewDetails(review);
+  },
+
+  async shareGrowthReview(reviewId: string, adminProfileId: string) {
+    assertAdmin(adminProfileId);
+    const data = getData();
+    const review = findGrowthReview(reviewId);
+    const signoffs = data.growthSignoffs.filter((signoff) => signoff.review_id === reviewId);
+    if (!hasTwoCoachSignoff(signoffs)) {
+      throw new Error("Two coach sign-offs are required before sharing");
+    }
+    review.status = "shared";
+    review.shared_at = now();
+    review.updated_at = now();
+    saveData(data);
+    return growthReviewDetails(review);
+  },
+
+  async submitGrowthReply(reviewId: string, athleteProfileId: string, body: string) {
+    const data = getData();
+    const review = findGrowthReview(reviewId);
+    const athlete = data.athletes.find((row) => row.id === review.athlete_id);
+    if (!athlete || athlete.profile_id !== athleteProfileId) {
+      throw new Error("Player cannot reply to this growth review");
+    }
+    if (review.status !== "shared" && review.status !== "disputed") {
+      throw new Error("Only shared growth reviews can receive replies");
+    }
+    const reply: PlayerGrowthReply = {
+      id: generateId("grr"),
+      review_id: reviewId,
+      athlete_id: athlete.id,
+      submitted_by: athleteProfileId,
+      body: body.trim(),
+      status: "open",
+      created_at: now(),
+      updated_at: now(),
+    };
+    data.growthReplies.push(reply);
+    review.status = "disputed";
+    review.updated_at = now();
+    saveData(data);
+    return reply;
   },
 
   async getCoachCampaigns(coachProfileId: string) {

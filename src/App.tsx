@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   BrowserRouter,
   Link,
@@ -14,7 +22,7 @@ import {
 import heroImage from "./assets/hero.png";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { api } from "./data";
-import { demoCoachLlm, enableCoachLlm, useMockBackend } from "./lib/env";
+import { demoCoachLlm, enableCoachLlm, enablePlayerGrowthMatrix, useMockBackend } from "./lib/env";
 import { demoCoachLlmConfigError } from "./lib/demoCoachLlmConfig";
 import type {
   AdminStats,
@@ -22,6 +30,8 @@ import type {
   CampaignReadinessEntry,
   CampaignWithMembership,
   ChangeRequestView,
+  GrowthReviewWithDetails,
+  PlayerCampaignFlow,
 } from "./data/types";
 import { draftPlayerReminder, summarizeCampaignReadiness } from "./lib/assistant";
 import {
@@ -41,12 +51,14 @@ import {
   type EvidenceItem,
 } from "./lib/coachNotes";
 import { getPassportStatus, passportStatusLabel } from "./lib/passport";
+import { canShareGrowthReview, getQuadrantInfo } from "./lib/playerGrowth";
 import { getProfileCompletion, getMissingAthleteFields } from "./lib/profile";
 import { getRoleHome } from "./lib/roles";
 import type {
   Athlete,
   AssistantDraft,
   Campaign,
+  CampaignTryoutBriefing,
   CoachAthleteView,
   CoachEvaluation,
   PriorCoachEvaluation,
@@ -245,6 +257,7 @@ const demoAccounts = [
   { email: "admin@sufa.test", label: "Admin" },
   { email: "coach@sufa.test", label: "Coach" },
   { email: "alice@sufa.test", label: "Player (Alice)" },
+  { email: "derrick@sufa.test", label: "Player (Derrick)" },
 ] as const;
 
 function LoginPage() {
@@ -506,7 +519,13 @@ function PlayerDashboard() {
               {campaigns.map((campaign) => (
                 <div className="campaign-strip-item" key={campaign.id}>
                   <div>
-                    <strong>{campaign.name}</strong>
+                    <strong>
+                      {enablePlayerGrowthMatrix ? (
+                        <Link to={`/player/campaigns/${campaign.id}`}>{campaign.name}</Link>
+                      ) : (
+                        campaign.name
+                      )}
+                    </strong>
                     <p className="muted">
                       {campaign.team ?? "Team TBC"} - {campaign.location ?? "Location TBC"}
                     </p>
@@ -827,14 +846,230 @@ function CheckboxField({
 }
 
 function PlayerCampaignPage() {
-  const { campaignId } = useParams();
+  const { campaignId = "" } = useParams();
+  const { profile } = useAuth();
+  const [flow, setFlow] = useState<PlayerCampaignFlow | null>(null);
+  const [reply, setReply] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    if (!profile) {
+      return;
+    }
+    setLoading(true);
+    setFlow(await api.getPlayerCampaignFlow(profile.id, campaignId));
+    setLoading(false);
+  }, [campaignId, profile]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function submitReply(reviewId: string) {
+    if (!profile || reply.trim().length === 0) {
+      return;
+    }
+    await api.submitGrowthReply(reviewId, profile.id, reply);
+    setReply("");
+    setMessage("Reply submitted. Your placement is unchanged while the dispute is reviewed.");
+    await load();
+  }
+
+  if (!enablePlayerGrowthMatrix) {
+    return (
+      <>
+        <PageHead title="Campaign Readiness" subtitle="Campaign-specific player checklist." />
+        <section className="card">
+          <p className="muted">
+            Player Growth Matrix is disabled for this deployment until the supporting database
+            tables are provisioned.
+          </p>
+        </section>
+      </>
+    );
+  }
+
+  if (loading) {
+    return (
+      <>
+        <PageHead title="Campaign Readiness" subtitle="Campaign-specific player checklist." />
+        <section className="card">
+          <p className="muted">Loading campaign flow...</p>
+        </section>
+      </>
+    );
+  }
+
+  if (!flow) {
+    return (
+      <>
+        <PageHead title="Campaign Readiness" subtitle="Campaign-specific player checklist." />
+        <section className="card">
+          <p className="muted">This campaign is not assigned to your player profile.</p>
+        </section>
+      </>
+    );
+  }
+
+  const latestReview = flow.reviews[0] ?? null;
+
   return (
     <>
-      <PageHead title="Campaign Readiness" subtitle="Campaign-specific player checklist." />
-      <section className="card">
-        <p>Player campaign route ready for campaign {campaignId}.</p>
+      <PageHead
+        title={flow.campaign.name}
+        subtitle="Tryout transparency, matrix placement, and right-of-reply."
+        eyebrow="Player campaign flow"
+      />
+      <div className="grid cols-2">
+        <TryoutBriefingPanel briefing={flow.briefing} />
+        <GrowthMatrixExplainer />
+      </div>
+      <section className="card stack growth-review-card">
+        <div className="section-title">
+          <h2>Latest quarterly placement</h2>
+          <Badge tone={latestReview ? growthStatusTone(latestReview.status) : "warn"}>
+            {latestReview?.status ?? "not shared"}
+          </Badge>
+        </div>
+        {latestReview ? (
+          <>
+            <GrowthReviewSummary review={latestReview} />
+            <div className="note-box">{latestReview.rationale}</div>
+            <p className="muted">
+              Signed by {latestReview.signoffs.length} coach
+              {latestReview.signoffs.length === 1 ? "" : "es"}. Results are shared with you and
+              available for admin welfare-board reporting.
+            </p>
+            {latestReview.replies.length > 0 ? (
+              <div className="stack">
+                <strong>Your replies</strong>
+                {latestReview.replies.map((growthReply) => (
+                  <p className="note-box" key={growthReply.id}>
+                    {growthReply.body}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            <div className="field">
+              <label htmlFor="growth-right-of-reply">Formal right-of-reply</label>
+              <textarea
+                id="growth-right-of-reply"
+                value={reply}
+                onChange={(event) => setReply(event.target.value)}
+                placeholder="Add context if you dispute this placement..."
+              />
+              <p className="hint">
+                Submitting a reply records a dispute for human review. It does not change the
+                placement automatically.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={reply.trim().length === 0}
+              onClick={() => void submitReply(latestReview.id)}
+            >
+              Submit reply
+            </button>
+            {message ? <p className="alert ok">{message}</p> : null}
+          </>
+        ) : (
+          <p className="muted">
+            No matrix placement has been shared yet. Drafts and one-coach sign-offs are not visible
+            to players.
+          </p>
+        )}
       </section>
     </>
+  );
+}
+
+function TryoutBriefingPanel({ briefing }: { briefing: CampaignTryoutBriefing | null }) {
+  if (!briefing) {
+    return (
+      <section className="card stack">
+        <div className="section-title">
+          <h2>Before tryouts</h2>
+          <Badge tone="warn">unpublished</Badge>
+        </div>
+        <p className="muted">The org chart and schedule have not been published yet.</p>
+      </section>
+    );
+  }
+  const rows = [
+    ["Head coach", briefing.head_coach],
+    ["Selectors", briefing.selectors],
+    ["Welfare committee", briefing.welfare_committee],
+    ["Liaison", briefing.liaison],
+    ["Training", briefing.training_schedule],
+    ["Camps", briefing.camps_schedule],
+    ["Competitions", briefing.competitions_schedule],
+    ["Time commitment", briefing.time_commitment],
+  ];
+  return (
+    <section className="card stack">
+      <div className="section-title">
+        <h2>Before tryouts</h2>
+        <Badge tone="ok">published</Badge>
+      </div>
+      <div className="definition-list">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{value || "TBC"}</strong>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function GrowthMatrixExplainer() {
+  return (
+    <section className="card stack">
+      <div className="section-title">
+        <h2>Growth Matrix</h2>
+        <Badge>quarterly</Badge>
+      </div>
+      <div className="matrix-explainer">
+        <div>
+          <strong>X-axis: current skill</strong>
+          <p className="muted">Physical output, tactical execution, performance under pressure.</p>
+        </div>
+        <div>
+          <strong>Y-axis: growth potential</strong>
+          <p className="muted">Trainability, feedback attitude, improvement rate, resilience.</p>
+        </div>
+      </div>
+      <p className="muted">
+        Each placement needs two-coach sign-off and a written rationale before it is shared.
+      </p>
+    </section>
+  );
+}
+
+function GrowthReviewSummary({ review }: { review: GrowthReviewWithDetails }) {
+  const quadrant = getQuadrantInfo(review.quadrant);
+  return (
+    <div className="growth-summary">
+      <div>
+        <span>Skill</span>
+        <strong>{review.skill_score}/5</strong>
+      </div>
+      <div>
+        <span>Growth potential</span>
+        <strong>{review.growth_potential_score}/5</strong>
+      </div>
+      <div>
+        <span>Quadrant</span>
+        <strong>{quadrant.label}</strong>
+      </div>
+      <div>
+        <span>Quarter</span>
+        <strong>{review.quarter_label}</strong>
+      </div>
+    </div>
   );
 }
 
@@ -1122,9 +1357,23 @@ function AdminCampaignDetailPage() {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [rows, setRows] = useState<CampaignReadinessEntry[]>([]);
   const [drafts, setDrafts] = useState<AssistantDraft[]>([]);
+  const [briefing, setBriefing] = useState<CampaignTryoutBriefing | null>(null);
+  const [growthReviews, setGrowthReviews] = useState<GrowthReviewWithDetails[]>([]);
   const [drafting, setDrafting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [assistantResponse, setAssistantResponse] = useState<string | null>(null);
+
+  const loadGrowthMatrixAdmin = useCallback(async () => {
+    if (!enablePlayerGrowthMatrix) {
+      return;
+    }
+    const [nextBriefing, nextGrowthReviews] = await Promise.all([
+      api.getTryoutBriefing(campaignId),
+      api.getCampaignGrowthReviews(campaignId),
+    ]);
+    setBriefing(nextBriefing);
+    setGrowthReviews(nextGrowthReviews);
+  }, [campaignId]);
 
   useEffect(() => {
     void Promise.all([api.getCampaign(campaignId), api.getCampaignReadiness(campaignId)]).then(
@@ -1133,7 +1382,8 @@ function AdminCampaignDetailPage() {
         setRows(nextRows);
       },
     );
-  }, [campaignId]);
+    void loadGrowthMatrixAdmin();
+  }, [campaignId, loadGrowthMatrixAdmin]);
 
   useEffect(() => {
     if (!profile) {
@@ -1215,6 +1465,15 @@ function AdminCampaignDetailPage() {
     setDrafting(false);
   }
 
+  async function handleShareGrowthReview(reviewId: string) {
+    if (!profile) {
+      return;
+    }
+    await api.shareGrowthReview(reviewId, profile.id);
+    setMessage("Growth review shared with the athlete and ready for welfare-board reporting.");
+    await loadGrowthMatrixAdmin();
+  }
+
   return (
     <>
       <PageHead
@@ -1254,6 +1513,13 @@ function AdminCampaignDetailPage() {
         </div>
         {message ? <p className="alert ok">{message}</p> : null}
       </section>
+      {enablePlayerGrowthMatrix ? (
+        <AdminGrowthMatrixPanel
+          briefing={briefing}
+          reviews={growthReviews}
+          onShare={(reviewId) => void handleShareGrowthReview(reviewId)}
+        />
+      ) : null}
       <section className="card stack assistant-card">
         <div className="section-title">
           <h2>Assistant</h2>
@@ -1363,6 +1629,99 @@ function buildIncompletePlayersAnswer(rows: readonly CampaignReadinessEntry[]): 
   }
 
   return lines.join("\n");
+}
+
+function AdminGrowthMatrixPanel({
+  briefing,
+  reviews,
+  onShare,
+}: {
+  briefing: CampaignTryoutBriefing | null;
+  reviews: GrowthReviewWithDetails[];
+  onShare: (reviewId: string) => void;
+}) {
+  const disputed = reviews.filter((review) => review.status === "disputed");
+  const welfareReady = reviews.filter(
+    (review) => review.status === "shared" || review.status === "closed",
+  );
+
+  return (
+    <section className="card stack growth-admin-panel">
+      <div className="section-title">
+        <h2>Player Growth Matrix</h2>
+        <Badge tone={briefing?.published ? "ok" : "warn"}>
+          {briefing?.published ? "briefing published" : "briefing unpublished"}
+        </Badge>
+      </div>
+      <div className="grid cols-3">
+        <StatCard
+          label="Reviews"
+          value={reviews.length}
+          detail="Quarterly matrix placements"
+          tone="accent"
+        />
+        <StatCard
+          label="Disputes"
+          value={disputed.length}
+          detail="Right-of-reply records"
+          tone={disputed.length > 0 ? "warn" : "ok"}
+        />
+        <StatCard
+          label="Welfare-board ready"
+          value={welfareReady.length}
+          detail="Shared placements for report"
+          tone="ok"
+        />
+      </div>
+      {reviews.length > 0 ? (
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Quarter</th>
+                <th>Quadrant</th>
+                <th>Sign-offs</th>
+                <th>Replies</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reviews.map((review) => (
+                <tr key={review.id}>
+                  <td>{review.athleteName}</td>
+                  <td>{review.quarter_label}</td>
+                  <td>{getQuadrantInfo(review.quadrant).label}</td>
+                  <td>{review.signoffs.length}/2</td>
+                  <td>{review.replies.length}</td>
+                  <td>
+                    <Badge tone={growthStatusTone(review.status)}>{review.status}</Badge>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={!canShareGrowthReview(review, review.signoffs)}
+                      onClick={() => onShare(review.id)}
+                    >
+                      Share
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="muted">No growth matrix reviews have been drafted for this campaign yet.</p>
+      )}
+      <p className="muted">
+        Sharing requires two distinct coach sign-offs. Player replies record disputes for human
+        review and do not alter the placement automatically.
+      </p>
+    </section>
+  );
 }
 
 function buildSportSyncReadinessAnswer(rows: readonly CampaignReadinessEntry[]): string {
@@ -1539,6 +1898,19 @@ function reviewRiskTone(risk: ReviewRisk): "danger" | "ok" | "warn" {
   return "ok";
 }
 
+function growthStatusTone(status: string): "accent" | "danger" | "ok" | "warn" {
+  if (status === "shared" || status === "closed") {
+    return "ok";
+  }
+  if (status === "disputed") {
+    return "danger";
+  }
+  if (status === "awaiting_second_signoff") {
+    return "accent";
+  }
+  return "warn";
+}
+
 function pendingReviewRequests(requests: readonly ChangeRequestView[]): ChangeRequestView[] {
   return requests.filter((request) => request.status === "pending");
 }
@@ -1671,11 +2043,90 @@ function CoachDashboard() {
 
 function CoachCampaignPage() {
   const { campaignId = "" } = useParams();
+  const { profile } = useAuth();
   const [athletes, setAthletes] = useState<CoachAthleteView[]>([]);
+  const [growthReviews, setGrowthReviews] = useState<GrowthReviewWithDetails[]>([]);
+  const [growthForm, setGrowthForm] = useState<GrowthMatrixFormState>(emptyGrowthMatrixForm);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!profile) {
+      return;
+    }
+    const [nextAthletes, nextGrowthReviews] = await Promise.all([
+      api.getCoachAthletes(campaignId),
+      enablePlayerGrowthMatrix
+        ? api.getCoachGrowthReviews(campaignId, profile.id)
+        : Promise.resolve([]),
+    ]);
+    setAthletes(nextAthletes);
+    setGrowthReviews(nextGrowthReviews);
+    setGrowthForm((current) => ({
+      ...current,
+      athleteId: current.athleteId || nextAthletes[0]?.id || "",
+    }));
+  }, [campaignId, profile]);
 
   useEffect(() => {
-    void api.getCoachAthletes(campaignId).then(setAthletes);
-  }, [campaignId]);
+    void load();
+  }, [load]);
+
+  function updateGrowthForm(field: keyof GrowthMatrixFormState, value: string) {
+    setGrowthForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function editGrowthReview(review: GrowthReviewWithDetails) {
+    setGrowthForm({
+      id: review.id,
+      athleteId: review.athlete_id,
+      quarterLabel: review.quarter_label,
+      skillScore: String(review.skill_score),
+      growthPotentialScore: String(review.growth_potential_score),
+      rationale: review.rationale,
+    });
+  }
+
+  async function saveGrowthDraft() {
+    if (!profile || !growthForm.athleteId || !growthForm.rationale.trim()) {
+      setMessage("Choose a player and add a written rationale before saving.");
+      return;
+    }
+    const saved = await api.saveGrowthReviewDraft({
+      id: growthForm.id,
+      campaignId,
+      athleteId: growthForm.athleteId,
+      coachProfileId: profile.id,
+      quarterLabel: growthForm.quarterLabel,
+      skillScore: Number(growthForm.skillScore),
+      growthPotentialScore: Number(growthForm.growthPotentialScore),
+      rationale: growthForm.rationale,
+    });
+    editGrowthReview(saved);
+    setMessage("Growth matrix draft saved. It still needs two-coach sign-off before sharing.");
+    await load();
+  }
+
+  async function signGrowthReview() {
+    if (!profile || !growthForm.id) {
+      setMessage("Save or select a growth review before signing.");
+      return;
+    }
+    const signed = await api.signGrowthReview(growthForm.id, profile.id);
+    editGrowthReview(signed);
+    setMessage(
+      signed.signoffs.length >= 2
+        ? "Second sign-off recorded. Admin can now share this placement."
+        : "Sign-off recorded. A second coach must sign before sharing.",
+    );
+    await load();
+  }
+
+  const latestReviewByAthlete = new Map<string, GrowthReviewWithDetails>();
+  for (const review of growthReviews) {
+    if (!latestReviewByAthlete.has(review.athlete_id)) {
+      latestReviewByAthlete.set(review.athlete_id, review);
+    }
+  }
 
   return (
     <>
@@ -1691,28 +2142,135 @@ function CoachCampaignPage() {
               <th>Player</th>
               <th>Phone</th>
               <th>Profile</th>
+              {enablePlayerGrowthMatrix ? <th>Growth Matrix</th> : null}
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
-            {athletes.map((athlete) => (
-              <tr key={athlete.id}>
-                <td>{athlete.preferred_name || athlete.legal_name || "Unknown athlete"}</td>
-                <td>{athlete.phone ?? "-"}</td>
-                <td>{athlete.profile_status}</td>
-                <td>
-                  <Link className="btn sm" to={`/coach/evaluations/${campaignId}/${athlete.id}`}>
-                    Evaluate
-                  </Link>
-                </td>
-              </tr>
-            ))}
+            {athletes.map((athlete) => {
+              const growthReview = latestReviewByAthlete.get(athlete.id);
+              return (
+                <tr key={athlete.id}>
+                  <td>{athlete.preferred_name || athlete.legal_name || "Unknown athlete"}</td>
+                  <td>{athlete.phone ?? "-"}</td>
+                  <td>{athlete.profile_status}</td>
+                  {enablePlayerGrowthMatrix ? (
+                    <td>
+                      {growthReview ? (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => editGrowthReview(growthReview)}
+                        >
+                          {growthReview.status}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() =>
+                            setGrowthForm((current) => ({ ...current, athleteId: athlete.id }))
+                          }
+                        >
+                          Draft matrix
+                        </button>
+                      )}
+                    </td>
+                  ) : null}
+                  <td>
+                    <Link className="btn sm" to={`/coach/evaluations/${campaignId}/${athlete.id}`}>
+                      Evaluate
+                    </Link>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>
+      {enablePlayerGrowthMatrix ? (
+        <section className="card stack">
+          <div className="section-title">
+            <h2>Growth Matrix review</h2>
+            <Badge>two-coach sign-off</Badge>
+          </div>
+          <div className="grid cols-2">
+            <div className="field">
+              <label htmlFor="growth-athlete">Player</label>
+              <select
+                id="growth-athlete"
+                value={growthForm.athleteId}
+                onChange={(event) => updateGrowthForm("athleteId", event.target.value)}
+              >
+                {athletes.map((athlete) => (
+                  <option key={athlete.id} value={athlete.id}>
+                    {athlete.preferred_name || athlete.legal_name || "Unknown athlete"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <TextField
+              label="Quarter label"
+              value={growthForm.quarterLabel}
+              onChange={(value) => updateGrowthForm("quarterLabel", value)}
+              required
+            />
+            <RatingField
+              label="Current skill score"
+              value={growthForm.skillScore}
+              onChange={(value) => updateGrowthForm("skillScore", value)}
+            />
+            <RatingField
+              label="Growth potential score"
+              value={growthForm.growthPotentialScore}
+              onChange={(value) => updateGrowthForm("growthPotentialScore", value)}
+            />
+          </div>
+          <TextAreaField
+            label="Written rationale"
+            value={growthForm.rationale}
+            onChange={(value) => updateGrowthForm("rationale", value)}
+          />
+          <div className="btn-row">
+            <button type="button" className="btn" onClick={() => void saveGrowthDraft()}>
+              Save matrix draft
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!growthForm.id}
+              onClick={() => void signGrowthReview()}
+            >
+              Sign matrix review
+            </button>
+          </div>
+          {message ? <p className="alert ok">{message}</p> : null}
+          <p className="muted">
+            Coaches draft placement and rationale only. Admin sharing is blocked until two distinct
+            coaches sign.
+          </p>
+        </section>
+      ) : null}
     </>
   );
 }
+
+interface GrowthMatrixFormState {
+  id?: string;
+  athleteId: string;
+  quarterLabel: string;
+  skillScore: string;
+  growthPotentialScore: string;
+  rationale: string;
+}
+
+const emptyGrowthMatrixForm: GrowthMatrixFormState = {
+  athleteId: "",
+  quarterLabel: "Q2 2026",
+  skillScore: "3",
+  growthPotentialScore: "3",
+  rationale: "",
+};
 
 function CoachEvaluationPage() {
   const { campaignId = "", playerId = "" } = useParams();

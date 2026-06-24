@@ -5,6 +5,7 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 const forceMock = import.meta.env.VITE_USE_MOCK === "true";
 const isTest = import.meta.env.MODE === "test";
 const forceCoachLlm = import.meta.env.VITE_ENABLE_COACH_LLM === "true";
+const forcePlayerGrowthMatrix = import.meta.env.VITE_ENABLE_PLAYER_GROWTH_MATRIX === "true";
 
 export const supabaseUrl = url ?? "";
 export const supabaseAnonKey = anonKey ?? "";
@@ -42,6 +43,10 @@ export const useRemoteCoachLlm =
   (!useMockBackend && forceCoachLlm) || (useMockBackend && demoCoachLlm);
 
 export const enableCoachLlm = useRemoteCoachLlm;
+
+// Growth Matrix uses new database tables in Supabase, so keep it opt-in there.
+// Mock mode enables it for local demos and tests.
+export const enablePlayerGrowthMatrix = useMockBackend || forcePlayerGrowthMatrix;
 
 export const appUrl =
   (import.meta.env.VITE_APP_URL as string | undefined) ??

@@ -439,6 +439,59 @@ a:hover {
   border-top: 0;
 }
 
+.definition-list,
+.matrix-explainer {
+  display: grid;
+  gap: 10px;
+}
+.definition-list > div,
+.matrix-explainer > div {
+  display: grid;
+  gap: 3px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.definition-list > div:first-child,
+.matrix-explainer > div:first-child {
+  border-top: 0;
+}
+.definition-list span,
+.growth-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.definition-list strong,
+.matrix-explainer strong,
+.growth-summary strong {
+  color: var(--text-h);
+}
+.growth-review-card,
+.growth-admin-panel {
+  margin-top: 16px;
+}
+.growth-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  overflow: hidden;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.growth-summary > div {
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  background: var(--surface-soft);
+}
+.growth-summary strong {
+  font-family: var(--display);
+  font-size: 18px;
+}
+
 /* Tables */
 .table-wrap {
   overflow-x: auto;
@@ -933,7 +986,8 @@ a:focus-visible {
   .readiness-metrics,
   .ops-metrics,
   .ops-lanes,
-  .ops-footer-grid {
+  .ops-footer-grid,
+  .growth-summary {
     grid-template-columns: 1fr;
   }
   .auth-screen {

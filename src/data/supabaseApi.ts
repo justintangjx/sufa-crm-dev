@@ -2,6 +2,11 @@
 // (migrations applied). Not exercised by the offline test suite; the Api type keeps
 // it in sync with the mock implementation.
 import { appUrl } from "../lib/env";
+import {
+  calculateMatrixQuadrant,
+  hasTwoCoachSignoff,
+  nextGrowthReviewStatus,
+} from "../lib/playerGrowth";
 import { getMissingAthleteFields } from "../lib/profile";
 import { getPassportStatus } from "../lib/passport";
 import { supabase } from "../lib/supabase";
@@ -15,8 +20,12 @@ import type {
   AssistantDraft,
   Athlete,
   Campaign,
+  CampaignTryoutBriefing,
   CoachAthleteView,
   CoachEvaluation,
+  PlayerGrowthReply,
+  PlayerGrowthReview,
+  PlayerGrowthSignoff,
   PriorCoachEvaluation,
   Profile,
 } from "../types/database";
@@ -27,9 +36,12 @@ import type {
   CampaignWithMembership,
   ChangeRequestView,
   EvaluationInput,
+  GrowthReviewInput,
+  GrowthReviewWithDetails,
   NewAssistantDraft,
   NewCampaign,
   SignInResult,
+  TryoutBriefingInput,
 } from "./types";
 import type { CoachNoteActionRequest, CoachNoteGenerationRequest } from "../lib/coachNotes";
 import { executeDeterministicCoachNoteAction } from "./coachNoteExecutor";
@@ -49,6 +61,67 @@ async function currentAthlete(profileId: string): Promise<Athlete | null> {
     .eq("profile_id", profileId)
     .maybeSingle();
   return (data as Athlete | null) ?? null;
+}
+
+function displayName(a: Pick<Athlete, "preferred_name" | "legal_name">): string {
+  return a.preferred_name || a.legal_name || "Unknown athlete";
+}
+
+async function growthReviewDetails(
+  reviews: PlayerGrowthReview[],
+  athleteNames?: Map<string, string>,
+): Promise<GrowthReviewWithDetails[]> {
+  if (reviews.length === 0) {
+    return [];
+  }
+  const reviewIds = reviews.map((review) => review.id);
+  const { data: signoffs } = await client()
+    .from("player_growth_signoffs")
+    .select("*")
+    .in("review_id", reviewIds);
+  const { data: replies } = await client()
+    .from("player_growth_replies")
+    .select("*")
+    .in("review_id", reviewIds);
+
+  let names = athleteNames;
+  if (!names) {
+    const athleteIds = [...new Set(reviews.map((review) => review.athlete_id))];
+    const { data: athletes } = await client()
+      .from("athletes")
+      .select("id, legal_name, preferred_name")
+      .in("id", athleteIds);
+    names = new Map(
+      ((athletes ?? []) as Pick<Athlete, "id" | "legal_name" | "preferred_name">[]).map(
+        (athlete) => [athlete.id, displayName(athlete)],
+      ),
+    );
+  }
+
+  const signoffRows = (signoffs ?? []) as PlayerGrowthSignoff[];
+  const replyRows = (replies ?? []) as PlayerGrowthReply[];
+  return reviews.map((review) => ({
+    ...review,
+    athleteName: names?.get(review.athlete_id) ?? "Unknown athlete",
+    signoffs: signoffRows.filter((signoff) => signoff.review_id === review.id),
+    replies: replyRows.filter((reply) => reply.review_id === review.id),
+  }));
+}
+
+function briefingPayload(input: TryoutBriefingInput, updatedBy: string) {
+  return {
+    campaign_id: input.campaignId,
+    head_coach: input.headCoach ?? null,
+    selectors: input.selectors ?? null,
+    welfare_committee: input.welfareCommittee ?? null,
+    liaison: input.liaison ?? null,
+    training_schedule: input.trainingSchedule ?? null,
+    camps_schedule: input.campsSchedule ?? null,
+    competitions_schedule: input.competitionsSchedule ?? null,
+    time_commitment: input.timeCommitment ?? null,
+    published: input.published,
+    updated_by: updatedBy,
+  };
 }
 
 export const supabaseApi: Api = {
@@ -255,6 +328,192 @@ export const supabaseApi: Api = {
       throw error;
     }
     return data as AssistantDraft;
+  },
+
+  async getTryoutBriefing(campaignId: string) {
+    const { data } = await client()
+      .from("campaign_tryout_briefings")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .maybeSingle();
+    return (data as CampaignTryoutBriefing | null) ?? null;
+  },
+
+  async saveTryoutBriefing(input: TryoutBriefingInput, updatedBy: string) {
+    const { data, error } = await client()
+      .from("campaign_tryout_briefings")
+      .upsert(briefingPayload(input, updatedBy), { onConflict: "campaign_id" })
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    return data as CampaignTryoutBriefing;
+  },
+
+  async getPlayerCampaignFlow(profileId: string, campaignId: string) {
+    const athlete = await currentAthlete(profileId);
+    if (!athlete) {
+      return null;
+    }
+    const { data: membership } = await client()
+      .from("campaign_members")
+      .select("status, campaigns(*)")
+      .eq("campaign_id", campaignId)
+      .eq("athlete_id", athlete.id)
+      .maybeSingle();
+    const row = membership as unknown as { status: string; campaigns: Campaign } | null;
+    if (!row?.campaigns) {
+      return null;
+    }
+    const briefing = await supabaseApi.getTryoutBriefing(campaignId);
+    const { data: reviews } = await client()
+      .from("player_growth_reviews")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .eq("athlete_id", athlete.id)
+      .in("status", ["shared", "disputed", "closed"])
+      .order("updated_at", { ascending: false });
+
+    return {
+      campaign: row.campaigns,
+      memberStatus: row.status as "invited" | "registered" | "selected" | "reserve" | "withdrawn",
+      briefing,
+      reviews: await growthReviewDetails(
+        reviews as PlayerGrowthReview[],
+        new Map([[athlete.id, displayName(athlete)]]),
+      ),
+    };
+  },
+
+  async getCampaignGrowthReviews(campaignId: string) {
+    const { data } = await client()
+      .from("player_growth_reviews")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .order("updated_at", { ascending: false });
+    return growthReviewDetails((data ?? []) as PlayerGrowthReview[]);
+  },
+
+  async getCoachGrowthReviews(campaignId: string, coachProfileId: string) {
+    const { data: athletes } = await client()
+      .from("coach_athlete_view")
+      .select("id, legal_name, preferred_name")
+      .eq("campaign_id", campaignId);
+    const athleteNames = new Map(
+      ((athletes ?? []) as Pick<Athlete, "id" | "legal_name" | "preferred_name">[]).map(
+        (athlete) => [athlete.id, displayName(athlete)],
+      ),
+    );
+    const { data } = await client()
+      .from("player_growth_reviews")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .order("updated_at", { ascending: false });
+    const reviews = ((data ?? []) as PlayerGrowthReview[]).filter((review) =>
+      athleteNames.has(review.athlete_id),
+    );
+    void coachProfileId;
+    return growthReviewDetails(reviews, athleteNames);
+  },
+
+  async saveGrowthReviewDraft(input: GrowthReviewInput) {
+    const payload = {
+      campaign_id: input.campaignId,
+      athlete_id: input.athleteId,
+      quarter_label: input.quarterLabel.trim(),
+      skill_score: input.skillScore,
+      growth_potential_score: input.growthPotentialScore,
+      quadrant: calculateMatrixQuadrant(input.skillScore, input.growthPotentialScore),
+      rationale: input.rationale.trim(),
+      created_by: input.coachProfileId,
+    };
+    const query = input.id
+      ? client()
+          .from("player_growth_reviews")
+          .update(payload)
+          .eq("id", input.id)
+          .select("*")
+          .single()
+      : client()
+          .from("player_growth_reviews")
+          .upsert(payload, { onConflict: "campaign_id,athlete_id,quarter_label" })
+          .select("*")
+          .single();
+    const { data, error } = await query;
+    if (error) {
+      throw error;
+    }
+    return (await growthReviewDetails([data as PlayerGrowthReview]))[0] as GrowthReviewWithDetails;
+  },
+
+  async signGrowthReview(reviewId: string, coachProfileId: string) {
+    const { data: reviewRow, error: reviewError } = await client()
+      .from("player_growth_reviews")
+      .select("*")
+      .eq("id", reviewId)
+      .single();
+    if (reviewError) {
+      throw reviewError;
+    }
+    const review = reviewRow as PlayerGrowthReview;
+    const { error: signoffError } = await client().from("player_growth_signoffs").upsert(
+      {
+        review_id: reviewId,
+        coach_profile_id: coachProfileId,
+      },
+      { onConflict: "review_id,coach_profile_id" },
+    );
+    if (signoffError) {
+      throw signoffError;
+    }
+    const { data: signoffs } = await client()
+      .from("player_growth_signoffs")
+      .select("*")
+      .eq("review_id", reviewId);
+    const status = nextGrowthReviewStatus(review, (signoffs ?? []) as PlayerGrowthSignoff[]);
+    const { data, error } = await client()
+      .from("player_growth_reviews")
+      .update({ status })
+      .eq("id", reviewId)
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    return (await growthReviewDetails([data as PlayerGrowthReview]))[0] as GrowthReviewWithDetails;
+  },
+
+  async shareGrowthReview(reviewId: string, adminProfileId: string) {
+    const { data: signoffs } = await client()
+      .from("player_growth_signoffs")
+      .select("*")
+      .eq("review_id", reviewId);
+    if (!hasTwoCoachSignoff((signoffs ?? []) as PlayerGrowthSignoff[])) {
+      throw new Error("Two coach sign-offs are required before sharing");
+    }
+    const { data, error } = await client()
+      .from("player_growth_reviews")
+      .update({ status: "shared", shared_at: new Date().toISOString() })
+      .eq("id", reviewId)
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    void adminProfileId;
+    return (await growthReviewDetails([data as PlayerGrowthReview]))[0] as GrowthReviewWithDetails;
+  },
+
+  async submitGrowthReply(reviewId: string, _athleteProfileId: string, body: string) {
+    const { data, error } = await client().rpc("submit_player_growth_reply", {
+      target_review_id: reviewId,
+      reply_body: body,
+    });
+    if (error) {
+      throw error;
+    }
+    return data as PlayerGrowthReply;
   },
 
   async getCoachCampaigns(coachProfileId: string) {

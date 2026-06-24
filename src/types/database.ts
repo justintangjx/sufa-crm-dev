@@ -26,6 +26,21 @@ export type AssistantDraftType = "player_reminder" | "coach_evaluation_structuri
 
 export type AssistantDraftStatus = "draft" | "approved" | "discarded";
 
+export type MatrixQuadrant =
+  | "core_minutes"
+  | "reliable_contributor"
+  | "development_priority"
+  | "foundation_builder";
+
+export type GrowthReviewStatus =
+  | "draft"
+  | "awaiting_second_signoff"
+  | "shared"
+  | "disputed"
+  | "closed";
+
+export type GrowthReplyStatus = "open" | "resolved";
+
 export type CoachNoteGenerationStatus = "succeeded" | "failed";
 export type CoachNoteGenerationSource = "llm" | "deterministic";
 export type CoachNoteFeedback = "useful" | "incorrect" | "missing_context";
@@ -139,6 +154,57 @@ export interface AssistantDraft {
   content: string;
   status: AssistantDraftStatus;
   created_at: string;
+}
+
+export interface CampaignTryoutBriefing {
+  id: string;
+  campaign_id: string;
+  head_coach: string | null;
+  selectors: string | null;
+  welfare_committee: string | null;
+  liaison: string | null;
+  training_schedule: string | null;
+  camps_schedule: string | null;
+  competitions_schedule: string | null;
+  time_commitment: string | null;
+  published: boolean;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlayerGrowthReview {
+  id: string;
+  campaign_id: string;
+  athlete_id: string;
+  quarter_label: string;
+  skill_score: number;
+  growth_potential_score: number;
+  quadrant: MatrixQuadrant;
+  rationale: string;
+  status: GrowthReviewStatus;
+  created_by: string | null;
+  shared_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlayerGrowthSignoff {
+  id: string;
+  review_id: string;
+  coach_profile_id: string;
+  signed_at: string;
+}
+
+export interface PlayerGrowthReply {
+  id: string;
+  review_id: string;
+  athlete_id: string;
+  submitted_by: string | null;
+  body: string;
+  status: GrowthReplyStatus;
+  created_at: string;
+  updated_at: string;
 }
 
 // Coach-safe projection of an athlete (see coach_athlete_view): no passport/admin fields.
