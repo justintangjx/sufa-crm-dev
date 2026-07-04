@@ -25,6 +25,24 @@ export function getData(): MockData {
         if (!memory.coachNoteTurns) {
           memory.coachNoteTurns = [];
         }
+        if (!memory.playerMatrixSubmissions) {
+          memory.playerMatrixSubmissions = [];
+        }
+        if (!memory.coachMatrixAssessments) {
+          memory.coachMatrixAssessments = [];
+        }
+        if (!memory.evaluationAuditEvents) {
+          memory.evaluationAuditEvents = [];
+        }
+        if (!memory.npsSurveys) {
+          memory.npsSurveys = [];
+        }
+        if (!memory.npsAssignments) {
+          memory.npsAssignments = [];
+        }
+        if (!memory.npsResponses) {
+          memory.npsResponses = [];
+        }
         return memory;
       } catch {
         // fall through to a fresh seed on corrupt data

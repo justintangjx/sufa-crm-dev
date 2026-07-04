@@ -925,6 +925,22 @@ a:focus-visible {
   font-size: 13px;
 }
 
+.nps-task {
+  display: grid;
+  gap: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.nps-coach-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 96px minmax(180px, 2fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+.compact-field {
+  min-width: 0;
+}
+
 /* Loading screen */
 .loading-screen {
   display: grid;
@@ -987,7 +1003,8 @@ a:focus-visible {
   .ops-metrics,
   .ops-lanes,
   .ops-footer-grid,
-  .growth-summary {
+  .growth-summary,
+  .nps-coach-row {
     grid-template-columns: 1fr;
   }
   .auth-screen {

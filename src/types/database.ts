@@ -45,6 +45,18 @@ export type CoachNoteGenerationStatus = "succeeded" | "failed";
 export type CoachNoteGenerationSource = "llm" | "deterministic";
 export type CoachNoteFeedback = "useful" | "incorrect" | "missing_context";
 
+export type MatrixSubmissionStatus = "draft" | "submitted";
+
+export type EvaluationAuditEventType = "created" | "updated" | "submitted";
+
+export type EvaluationAuditEntityType = "player_matrix_submission" | "coach_matrix_assessment";
+
+export type NpsSurveyWindow = "mid_season" | "post_season";
+
+export type NpsSurveyStatus = "draft" | "open" | "closed";
+
+export type NpsAssignmentStatus = "pending" | "completed";
+
 export interface Profile {
   id: string;
   email: string;
@@ -285,4 +297,88 @@ export interface PriorCoachEvaluation {
   developmentAreas: string | null;
   overallNotes: string | null;
   recommendation: Recommendation | null;
+}
+
+export interface PlayerMatrixSubmission {
+  id: string;
+  campaign_id: string;
+  athlete_id: string;
+  submitted_by: string | null;
+  skill_score: number | null;
+  growth_score: number | null;
+  readiness_score: number | null;
+  confidence_score: number | null;
+  strengths: string | null;
+  development_focus: string | null;
+  support_needed: string | null;
+  status: MatrixSubmissionStatus;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CoachMatrixAssessment {
+  id: string;
+  campaign_id: string;
+  athlete_id: string;
+  coach_profile_id: string;
+  skill_score: number | null;
+  growth_score: number | null;
+  readiness_score: number | null;
+  tactical_score: number | null;
+  strengths: string | null;
+  development_focus: string | null;
+  coach_notes: string | null;
+  status: MatrixSubmissionStatus;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvaluationAuditEvent {
+  id: string;
+  campaign_id: string;
+  athlete_id: string;
+  actor_profile_id: string | null;
+  actor_role: Role;
+  event_type: EvaluationAuditEventType;
+  entity_type: EvaluationAuditEntityType;
+  entity_id: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CampaignNpsSurvey {
+  id: string;
+  campaign_id: string;
+  title: string;
+  survey_window: NpsSurveyWindow;
+  status: NpsSurveyStatus;
+  opens_at: string | null;
+  closes_at: string | null;
+  min_response_count: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignNpsAssignment {
+  id: string;
+  survey_id: string;
+  athlete_id: string;
+  status: NpsAssignmentStatus;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface CampaignNpsResponse {
+  id: string;
+  survey_id: string;
+  assignment_id: string;
+  athlete_id: string;
+  target_coach_profile_id: string;
+  score: number;
+  comment: string | null;
+  created_at: string;
+  updated_at: string;
 }

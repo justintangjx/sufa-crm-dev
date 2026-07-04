@@ -10,8 +10,12 @@ this repository. Read them before writing code.
    requirements.
 2. Read [`docs/context.md`](docs/context.md) for the current implementation map,
    deployment state, demo flows, and next build queue.
-3. Read [`docs/tooling.md`](docs/tooling.md) to know the commands and conventions.
-4. For multi-agent work, read
+3. Read [`docs/campaign-architecture.md`](docs/campaign-architecture.md) for the current
+   U24 Worlds campaign-management architecture, data flow, and decision log.
+4. Read [`docs/cleanup-refactor-plan.md`](docs/cleanup-refactor-plan.md) before structural
+   refactors or large feature additions.
+5. Read [`docs/tooling.md`](docs/tooling.md) to know the commands and conventions.
+6. For multi-agent work, read
    [`docs/agent-orchestration.md`](docs/agent-orchestration.md).
 
 ## Core principles (do not violate)
@@ -42,6 +46,11 @@ this repository. Read them before writing code.
 - If multiple coding agents are active, respect the ownership lanes in
   [`docs/agent-orchestration.md`](docs/agent-orchestration.md). Do not edit a role-owned
   file at the same time as another agent without coordination.
+- Keep docs in the loop. Any feature/refactor that changes routes, schema, RLS, feature
+  flags, deployment setup, demo flows, or role boundaries must update `docs/context.md`
+  and, when architectural decisions change, `docs/campaign-architecture.md`.
+- Future final responses for features/refactors must state whether manual Supabase or
+  Cloudflare work is required, even when the answer is "none".
 
 ## Tests and checks are the judge
 

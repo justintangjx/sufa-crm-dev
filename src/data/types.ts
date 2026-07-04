@@ -5,12 +5,19 @@ import type {
   AssistantDraftType,
   Athlete,
   Campaign,
+  CampaignNpsSurvey,
   CampaignTryoutBriefing,
   CampaignMemberStatus,
   CampaignStatus,
   CoachAthleteView,
   CoachEvaluation,
+  CoachMatrixAssessment,
+  EvaluationAuditEvent,
   EvaluationStatus,
+  MatrixSubmissionStatus,
+  NpsSurveyStatus,
+  NpsSurveyWindow,
+  PlayerMatrixSubmission,
   PlayerGrowthReply,
   PlayerGrowthReview,
   PlayerGrowthSignoff,
@@ -159,6 +166,101 @@ export interface EvaluationInput {
   status: EvaluationStatus;
 }
 
+export interface PlayerMatrixInput {
+  id?: string;
+  campaignId: string;
+  athleteId: string;
+  submittedBy: string;
+  skillScore?: number | null;
+  growthScore?: number | null;
+  readinessScore?: number | null;
+  confidenceScore?: number | null;
+  strengths?: string | null;
+  developmentFocus?: string | null;
+  supportNeeded?: string | null;
+  status: MatrixSubmissionStatus;
+}
+
+export interface CoachMatrixInput {
+  id?: string;
+  campaignId: string;
+  athleteId: string;
+  coachProfileId: string;
+  skillScore?: number | null;
+  growthScore?: number | null;
+  readinessScore?: number | null;
+  tacticalScore?: number | null;
+  strengths?: string | null;
+  developmentFocus?: string | null;
+  coachNotes?: string | null;
+  status: MatrixSubmissionStatus;
+}
+
+export interface CampaignMatrixStatusRow {
+  athleteId: string;
+  athleteName: string;
+  memberStatus: CampaignMemberStatus;
+  playerSubmission: PlayerMatrixSubmission | null;
+  coachAssessments: CoachMatrixAssessment[];
+  playerStatus: MatrixSubmissionStatus | "not_started";
+  submittedCoachCount: number;
+}
+
+export interface CampaignOperatingSummary {
+  campaign: Campaign | null;
+  rosterCount: number;
+  profileReadyCount: number;
+  playerMatrixSubmittedCount: number;
+  coachMatrixSubmittedCount: number;
+  openNpsSurveyCount: number;
+}
+
+export interface NpsSurveyInput {
+  campaignId: string;
+  title: string;
+  window: NpsSurveyWindow;
+  status: NpsSurveyStatus;
+  opensAt?: string | null;
+  closesAt?: string | null;
+  minResponseCount?: number;
+  createdBy: string;
+}
+
+export interface NpsTask {
+  survey: CampaignNpsSurvey;
+  assignmentId: string;
+  status: "pending" | "completed";
+  coaches: {
+    profileId: string;
+    name: string;
+    alreadyResponded: boolean;
+  }[];
+}
+
+export interface NpsResponseInput {
+  surveyId: string;
+  assignmentId: string;
+  athleteId: string;
+  targetCoachProfileId: string;
+  score: number;
+  comment?: string | null;
+}
+
+export interface NpsCoachReportRow {
+  surveyId: string;
+  surveyTitle: string;
+  surveyWindow: NpsSurveyWindow;
+  coachProfileId: string;
+  coachName: string;
+  responseCount: number;
+  averageScore: number | null;
+  nps: number | null;
+  promoterCount: number;
+  passiveCount: number;
+  detractorCount: number;
+  withheld: boolean;
+}
+
 export interface Api {
   getCurrentProfile(): Promise<Profile | null>;
   signIn(email: string): Promise<SignInResult>;
@@ -175,6 +277,25 @@ export interface Api {
   createCampaign(input: NewCampaign, createdBy: string): Promise<Campaign>;
   assignCampaignMember(input: CampaignMemberAssignment): Promise<void>;
   getCampaignReadiness(campaignId: string): Promise<CampaignReadinessEntry[]>;
+  getCampaignOperatingSummary(campaignId: string): Promise<CampaignOperatingSummary>;
+  getCampaignMatrixStatus(campaignId: string): Promise<CampaignMatrixStatusRow[]>;
+  listEvaluationAuditEvents(campaignId: string): Promise<EvaluationAuditEvent[]>;
+  getPlayerMatrixSubmission(
+    campaignId: string,
+    athleteId: string,
+  ): Promise<PlayerMatrixSubmission | null>;
+  savePlayerMatrixSubmission(input: PlayerMatrixInput): Promise<PlayerMatrixSubmission>;
+  getCoachMatrixAssessment(
+    campaignId: string,
+    athleteId: string,
+    coachProfileId: string,
+  ): Promise<CoachMatrixAssessment | null>;
+  saveCoachMatrixAssessment(input: CoachMatrixInput): Promise<CoachMatrixAssessment>;
+  listNpsSurveys(campaignId: string): Promise<CampaignNpsSurvey[]>;
+  saveNpsSurvey(input: NpsSurveyInput): Promise<CampaignNpsSurvey>;
+  listPlayerNpsTasks(profileId: string, campaignId?: string): Promise<NpsTask[]>;
+  submitNpsResponse(input: NpsResponseInput): Promise<void>;
+  getNpsReport(campaignId: string): Promise<NpsCoachReportRow[]>;
   listChangeRequests(): Promise<ChangeRequestView[]>;
   reviewChangeRequest(
     id: string,

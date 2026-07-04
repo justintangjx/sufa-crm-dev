@@ -10,6 +10,8 @@ It does not replace `prd.md`, which remains the canonical product spec.
 - Agent rules: `AGENTS.md`
 - Tooling commands: `docs/tooling.md`
 - Multi-agent workflow: `docs/agent-orchestration.md`
+- U24 campaign architecture + decision log: `docs/campaign-architecture.md`
+- Cleanup/refactor plan: `docs/cleanup-refactor-plan.md`
 - Future Google Sheets campaign snapshot implementation:
   `docs/google-sheets-snapshots.md`
 - Coach LLM architecture and evaluation: `docs/coach-llm.md`
@@ -39,18 +41,28 @@ Implemented:
   assistant, and review-queue triage assistant.
 - Coach dashboard, coach-safe campaign player list, and rough-notes-to-evaluation
   assistant.
+- U24 Worlds campaign-management pivot:
+  - active mock campaign `c-u24` / `U24 Worlds 2026`
+  - live player self-evaluation matrix
+  - coach matrix assessment with audit events
+  - admin matrix status and audit panel
+  - admin-managed mid/post coach NPS with aggregate threshold reporting
 - Component/unit tests for the current MVP agent flows.
 - Cloudflare Pages SPA fallback in `public/_redirects`.
 
 Known gaps:
 
 - Most UI still lives in `src/App.tsx`; split it into route/page modules before heavy
-  parallel role-agent work.
+  parallel role-agent work. See `docs/cleanup-refactor-plan.md`.
+- U24 selected-player upload/import is not implemented. Admins can only assign existing
+  athletes to a campaign one at a time from `/admin/campaigns/:campaignId`; production
+  roster setup still needs manual seeding or a future roster import flow.
 - `/admin/players` needs real search and filters.
 - `/admin/exports` is still a placeholder despite CSV helper logic existing.
 - Campaign creation/invitation flows are minimal or missing.
 - Coach evaluation submit validation is light.
-- E2E tests are not yet implemented.
+- E2E coverage exists but is still light; expand it for U24 admin/player/coach matrix
+  and NPS flows.
 - Production Supabase Auth needs deliverable emails; `.test` demo emails work only in
   mock mode.
 
@@ -85,6 +97,12 @@ The app chooses a backend in `src/data/index.ts`.
 - `VITE_ENABLE_PLAYER_GROWTH_MATRIX=false` keeps the audited Growth Matrix workflow off
   on Supabase-backed deployments until the `player_growth_matrix` migration has been
   applied. Mock mode enables the flow for local demos/tests.
+- `VITE_ENABLE_CAMPAIGN_EVALUATION_MATRIX=false` keeps the U24 live matrix off on
+  Supabase-backed deployments until `20260704000000_campaign_management_pivot.sql` is
+  applied and campaign data is seeded. Mock mode enables it for local demos/tests.
+- `VITE_ENABLE_CAMPAIGN_NPS=false` keeps campaign NPS off on Supabase-backed deployments
+  until the same migration and survey/assignment data path are ready. Mock mode enables
+  it for local demos/tests.
 
 Mock backend seed users:
 
@@ -103,6 +121,15 @@ Player Growth Matrix demo:
 - For Supabase-backed demos, create Auth users for `admin@sufa.test`,
   `coach@sufa.test`, `coach2@sufa.test`, and `alice@sufa.test`, then run
   `supabase/seed-player-growth-demo.sql` after applying migrations.
+
+U24 Worlds campaign demo:
+
+- In mock mode, admin/coach/player dashboards prefer `U24 Worlds 2026` (`c-u24`).
+- Mock U24 selected players are Alice, Ben, and Cara through `campaign_members`.
+- Alice has a submitted player matrix and one submitted coach assessment.
+- The mid-season coach NPS survey is open and aggregate reporting is withheld until at
+  least three responses exist for a coach.
+- There is no CSV/upload path for U24 selected-player details yet.
 
 ## Deployment
 
@@ -124,6 +151,16 @@ Cloudflare Pages settings:
   - `VITE_APP_URL=https://sufa-crm-dev.pages.dev`
   - `NODE_VERSION=22`
 
+Optional feature flags for Supabase-backed campaign management:
+
+```txt
+VITE_ENABLE_CAMPAIGN_EVALUATION_MATRIX=false
+VITE_ENABLE_CAMPAIGN_NPS=false
+```
+
+Only set these to `true` in Cloudflare after the campaign-management migration has been
+applied and production data has been seeded.
+
 React Router fallback:
 
 ```txt
@@ -138,6 +175,22 @@ npx supabase login
 npx supabase link --project-ref kowzzhlpeesmuoosuobl
 npx supabase db push
 ```
+
+Campaign-management migration:
+
+```txt
+supabase/migrations/20260704000000_campaign_management_pivot.sql
+```
+
+Manual Supabase setup for real U24 campaign use:
+
+1. Apply migrations.
+2. Create real Auth users and `profiles` for admins, coaches, and players.
+3. Create/import `athletes`.
+4. Create the U24 campaign row if needed.
+5. Insert selected players into `campaign_members`.
+6. Insert coaches into `campaign_coaches`.
+7. Enable Cloudflare feature flags only after the above is complete.
 
 Coach-note migrations must apply in order:
 

@@ -22,15 +22,28 @@ import {
 import heroImage from "./assets/hero.png";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { api } from "./data";
-import { demoCoachLlm, enableCoachLlm, enablePlayerGrowthMatrix, useMockBackend } from "./lib/env";
+import {
+  demoCoachLlm,
+  enableCampaignEvaluationMatrix,
+  enableCampaignNps,
+  enableCoachLlm,
+  enablePlayerGrowthMatrix,
+  useMockBackend,
+} from "./lib/env";
 import { demoCoachLlmConfigError } from "./lib/demoCoachLlmConfig";
 import type {
   AdminStats,
   AthletePatch,
+  CampaignMatrixStatusRow,
+  CampaignOperatingSummary,
   CampaignReadinessEntry,
   CampaignWithMembership,
   ChangeRequestView,
+  CoachMatrixInput,
   GrowthReviewWithDetails,
+  NpsCoachReportRow,
+  NpsTask,
+  PlayerMatrixInput,
   PlayerCampaignFlow,
 } from "./data/types";
 import { draftPlayerReminder, summarizeCampaignReadiness } from "./lib/assistant";
@@ -61,7 +74,11 @@ import type {
   CampaignTryoutBriefing,
   CoachAthleteView,
   CoachEvaluation,
+  CoachMatrixAssessment,
+  EvaluationAuditEvent,
+  MatrixSubmissionStatus,
   PriorCoachEvaluation,
+  PlayerMatrixSubmission,
   Recommendation,
   Role,
 } from "./types/database";
@@ -196,9 +213,20 @@ const roleNav: Record<Role, { to: string; label: string }[]> = {
   ],
   coach: [
     { to: "/coach", label: "Dashboard" },
-    { to: "/coach/campaigns/c-sea", label: "SEA Games" },
+    { to: "/coach/campaigns/c-u24", label: "U24 Worlds" },
   ],
 };
+
+function pickPrimaryCampaign(campaigns: readonly Campaign[]): Campaign | null {
+  return (
+    campaigns.find(
+      (campaign) => campaign.status === "active" && campaign.name.toLowerCase().includes("u24"),
+    ) ??
+    campaigns.find((campaign) => campaign.status === "active") ??
+    campaigns[0] ??
+    null
+  );
+}
 
 function DemoCoachLlmConfigBanner() {
   if (!demoCoachLlm || !demoCoachLlmConfigError) {
@@ -408,17 +436,23 @@ function PlayerDashboard() {
   const { profile } = useAuth();
   const [athlete, setAthlete] = useState<Athlete | null>(null);
   const [campaigns, setCampaigns] = useState<CampaignWithMembership[]>([]);
+  const [npsTasks, setNpsTasks] = useState<NpsTask[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!profile) {
       return;
     }
+    setLoaded(false);
     void Promise.all([
       api.getAthleteForProfile(profile.id),
       api.getCampaignsForProfile(profile.id),
-    ]).then(([nextAthlete, nextCampaigns]) => {
+      enableCampaignNps ? api.listPlayerNpsTasks(profile.id) : Promise.resolve([]),
+    ]).then(([nextAthlete, nextCampaigns, nextNpsTasks]) => {
       setAthlete(nextAthlete);
       setCampaigns(nextCampaigns);
+      setNpsTasks(nextNpsTasks);
+      setLoaded(true);
     });
   }, [profile]);
 
@@ -428,11 +462,26 @@ function PlayerDashboard() {
   const submittedReviewCount = athlete?.profile_status === "submitted" ? 1 : 0;
   const blockerCount = missing.length;
 
+  if (!loaded) {
+    return (
+      <>
+        <PageHead
+          title="Player Campaign Hub"
+          subtitle="Your U24 Worlds profile, live self-evaluation, and coach NPS tasks."
+          eyebrow="Player workspace"
+        />
+        <section className="card">
+          <p className="muted">Loading player campaign tasks...</p>
+        </section>
+      </>
+    );
+  }
+
   return (
     <>
       <PageHead
-        title="Player Dashboard"
-        subtitle="Your personal readiness checklist for national team campaigns."
+        title="Player Campaign Hub"
+        subtitle="Your U24 Worlds profile, live self-evaluation, and coach NPS tasks."
         eyebrow="Player workspace"
         actions={
           <Link className="btn primary" to="/player/profile">
@@ -469,6 +518,12 @@ function PlayerDashboard() {
             <strong>{activeCampaigns.length}</strong>
             <span>Active campaign assignments</span>
           </div>
+          {enableCampaignNps ? (
+            <div className="readiness-metric">
+              <strong>{npsTasks.length}</strong>
+              <span>Open NPS surveys</span>
+            </div>
+          ) : null}
         </div>
       </section>
       <div className="grid cols-2 role-dashboard-grid">
@@ -520,11 +575,7 @@ function PlayerDashboard() {
                 <div className="campaign-strip-item" key={campaign.id}>
                   <div>
                     <strong>
-                      {enablePlayerGrowthMatrix ? (
-                        <Link to={`/player/campaigns/${campaign.id}`}>{campaign.name}</Link>
-                      ) : (
-                        campaign.name
-                      )}
+                      <Link to={`/player/campaigns/${campaign.id}`}>{campaign.name}</Link>
                     </strong>
                     <p className="muted">
                       {campaign.team ?? "Team TBC"} - {campaign.location ?? "Location TBC"}
@@ -845,10 +896,76 @@ function CheckboxField({
   );
 }
 
+interface PlayerMatrixFormState {
+  skillScore: string;
+  growthScore: string;
+  readinessScore: string;
+  confidenceScore: string;
+  strengths: string;
+  developmentFocus: string;
+  supportNeeded: string;
+}
+
+const emptyPlayerMatrixForm: PlayerMatrixFormState = {
+  skillScore: "3",
+  growthScore: "3",
+  readinessScore: "3",
+  confidenceScore: "3",
+  strengths: "",
+  developmentFocus: "",
+  supportNeeded: "",
+};
+
+function playerMatrixFormFromSubmission(
+  submission: PlayerMatrixSubmission | null,
+): PlayerMatrixFormState {
+  return {
+    skillScore: submission?.skill_score ? String(submission.skill_score) : "3",
+    growthScore: submission?.growth_score ? String(submission.growth_score) : "3",
+    readinessScore: submission?.readiness_score ? String(submission.readiness_score) : "3",
+    confidenceScore: submission?.confidence_score ? String(submission.confidence_score) : "3",
+    strengths: submission?.strengths ?? "",
+    developmentFocus: submission?.development_focus ?? "",
+    supportNeeded: submission?.support_needed ?? "",
+  };
+}
+
+function playerMatrixInputFromForm(
+  form: PlayerMatrixFormState,
+  input: {
+    id?: string;
+    campaignId: string;
+    athleteId: string;
+    submittedBy: string;
+    status: MatrixSubmissionStatus;
+  },
+): PlayerMatrixInput {
+  return {
+    id: input.id,
+    campaignId: input.campaignId,
+    athleteId: input.athleteId,
+    submittedBy: input.submittedBy,
+    skillScore: ratingValue(form.skillScore),
+    growthScore: ratingValue(form.growthScore),
+    readinessScore: ratingValue(form.readinessScore),
+    confidenceScore: ratingValue(form.confidenceScore),
+    strengths: optionalText(form.strengths),
+    developmentFocus: optionalText(form.developmentFocus),
+    supportNeeded: optionalText(form.supportNeeded),
+    status: input.status,
+  };
+}
+
 function PlayerCampaignPage() {
   const { campaignId = "" } = useParams();
   const { profile } = useAuth();
   const [flow, setFlow] = useState<PlayerCampaignFlow | null>(null);
+  const [athlete, setAthlete] = useState<Athlete | null>(null);
+  const [matrixSubmission, setMatrixSubmission] = useState<PlayerMatrixSubmission | null>(null);
+  const [matrixForm, setMatrixForm] = useState<PlayerMatrixFormState>(emptyPlayerMatrixForm);
+  const [npsTasks, setNpsTasks] = useState<NpsTask[]>([]);
+  const [npsScores, setNpsScores] = useState<Record<string, string>>({});
+  const [npsComments, setNpsComments] = useState<Record<string, string>>({});
   const [reply, setReply] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -858,7 +975,19 @@ function PlayerCampaignPage() {
       return;
     }
     setLoading(true);
-    setFlow(await api.getPlayerCampaignFlow(profile.id, campaignId));
+    const [nextFlow, nextAthlete, nextNpsTasks] = await Promise.all([
+      api.getPlayerCampaignFlow(profile.id, campaignId),
+      api.getAthleteForProfile(profile.id),
+      enableCampaignNps ? api.listPlayerNpsTasks(profile.id, campaignId) : Promise.resolve([]),
+    ]);
+    setFlow(nextFlow);
+    setAthlete(nextAthlete);
+    setNpsTasks(nextNpsTasks);
+    if (nextAthlete && enableCampaignEvaluationMatrix) {
+      const nextSubmission = await api.getPlayerMatrixSubmission(campaignId, nextAthlete.id);
+      setMatrixSubmission(nextSubmission);
+      setMatrixForm(playerMatrixFormFromSubmission(nextSubmission));
+    }
     setLoading(false);
   }, [campaignId, profile]);
 
@@ -876,7 +1005,51 @@ function PlayerCampaignPage() {
     await load();
   }
 
-  if (!enablePlayerGrowthMatrix) {
+  function updateMatrixForm(field: keyof PlayerMatrixFormState, value: string) {
+    setMatrixForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function saveMatrix(status: MatrixSubmissionStatus) {
+    if (!profile || !athlete) {
+      return;
+    }
+    const saved = await api.savePlayerMatrixSubmission(
+      playerMatrixInputFromForm(matrixForm, {
+        id: matrixSubmission?.id,
+        campaignId,
+        athleteId: athlete.id,
+        submittedBy: profile.id,
+        status,
+      }),
+    );
+    setMatrixSubmission(saved);
+    setMatrixForm(playerMatrixFormFromSubmission(saved));
+    setMessage(status === "submitted" ? "Self-evaluation submitted." : "Self-evaluation saved.");
+  }
+
+  async function submitNps(task: NpsTask, coachProfileId: string) {
+    if (!athlete) {
+      return;
+    }
+    const key = `${task.survey.id}:${coachProfileId}`;
+    const score = Number(npsScores[key]);
+    if (!Number.isInteger(score) || score < 0 || score > 10) {
+      setMessage("Choose an NPS score from 0 to 10 before submitting.");
+      return;
+    }
+    await api.submitNpsResponse({
+      surveyId: task.survey.id,
+      assignmentId: task.assignmentId,
+      athleteId: athlete.id,
+      targetCoachProfileId: coachProfileId,
+      score,
+      comment: optionalText(npsComments[key]),
+    });
+    setMessage("Coach NPS response submitted anonymously into aggregate reporting.");
+    await load();
+  }
+
+  if (!enablePlayerGrowthMatrix && !enableCampaignEvaluationMatrix && !enableCampaignNps) {
     return (
       <>
         <PageHead title="Campaign Readiness" subtitle="Campaign-specific player checklist." />
@@ -918,69 +1091,199 @@ function PlayerCampaignPage() {
     <>
       <PageHead
         title={flow.campaign.name}
-        subtitle="Tryout transparency, matrix placement, and right-of-reply."
-        eyebrow="Player campaign flow"
+        subtitle="U24 campaign tasks from training start through competition closeout."
+        eyebrow="Player campaign hub"
       />
-      <div className="grid cols-2">
-        <TryoutBriefingPanel briefing={flow.briefing} />
-        <GrowthMatrixExplainer />
-      </div>
-      <section className="card stack growth-review-card">
-        <div className="section-title">
-          <h2>Latest quarterly placement</h2>
-          <Badge tone={latestReview ? growthStatusTone(latestReview.status) : "warn"}>
-            {latestReview?.status ?? "not shared"}
-          </Badge>
-        </div>
-        {latestReview ? (
-          <>
-            <GrowthReviewSummary review={latestReview} />
-            <div className="note-box">{latestReview.rationale}</div>
-            <p className="muted">
-              Signed by {latestReview.signoffs.length} coach
-              {latestReview.signoffs.length === 1 ? "" : "es"}. Results are shared with you and
-              available for admin welfare-board reporting.
-            </p>
-            {latestReview.replies.length > 0 ? (
-              <div className="stack">
-                <strong>Your replies</strong>
-                {latestReview.replies.map((growthReply) => (
-                  <p className="note-box" key={growthReply.id}>
-                    {growthReply.body}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-            <div className="field">
-              <label htmlFor="growth-right-of-reply">Formal right-of-reply</label>
-              <textarea
-                id="growth-right-of-reply"
-                value={reply}
-                onChange={(event) => setReply(event.target.value)}
-                placeholder="Add context if you dispute this placement..."
-              />
-              <p className="hint">
-                Submitting a reply records a dispute for human review. It does not change the
-                placement automatically.
-              </p>
-            </div>
+      {enableCampaignEvaluationMatrix ? (
+        <section className="card stack">
+          <div className="section-title">
+            <h2>Live self-evaluation matrix</h2>
+            <Badge tone={matrixSubmission?.status === "submitted" ? "ok" : "warn"}>
+              {matrixSubmission?.status ?? "not started"}
+            </Badge>
+          </div>
+          <div className="grid cols-4">
+            <RatingField
+              label="Current skill"
+              value={matrixForm.skillScore}
+              onChange={(value) => updateMatrixForm("skillScore", value)}
+            />
+            <RatingField
+              label="Growth potential"
+              value={matrixForm.growthScore}
+              onChange={(value) => updateMatrixForm("growthScore", value)}
+            />
+            <RatingField
+              label="Competition readiness"
+              value={matrixForm.readinessScore}
+              onChange={(value) => updateMatrixForm("readinessScore", value)}
+            />
+            <RatingField
+              label="Confidence"
+              value={matrixForm.confidenceScore}
+              onChange={(value) => updateMatrixForm("confidenceScore", value)}
+            />
+          </div>
+          <TextAreaField
+            label="Strengths"
+            value={matrixForm.strengths}
+            onChange={(value) => updateMatrixForm("strengths", value)}
+          />
+          <TextAreaField
+            label="Development focus"
+            value={matrixForm.developmentFocus}
+            onChange={(value) => updateMatrixForm("developmentFocus", value)}
+          />
+          <TextAreaField
+            label="Support needed"
+            value={matrixForm.supportNeeded}
+            onChange={(value) => updateMatrixForm("supportNeeded", value)}
+          />
+          <div className="btn-row">
+            <button type="button" className="btn" onClick={() => void saveMatrix("draft")}>
+              Save self-evaluation
+            </button>
             <button
               type="button"
               className="btn primary"
-              disabled={reply.trim().length === 0}
-              onClick={() => void submitReply(latestReview.id)}
+              onClick={() => void saveMatrix("submitted")}
             >
-              Submit reply
+              Submit self-evaluation
             </button>
-            {message ? <p className="alert ok">{message}</p> : null}
-          </>
-        ) : (
+          </div>
           <p className="muted">
-            No matrix placement has been shared yet. Drafts and one-coach sign-offs are not visible
-            to players.
+            Coaches can use this as context, but coach assessments remain separate and audited.
           </p>
-        )}
-      </section>
+        </section>
+      ) : null}
+      {enableCampaignNps && npsTasks.length > 0 ? (
+        <section className="card stack">
+          <div className="section-title">
+            <h2>Coach NPS</h2>
+            <Badge>{npsTasks.length} open</Badge>
+          </div>
+          {npsTasks.map((task) => (
+            <div className="nps-task" key={task.assignmentId}>
+              <strong>{task.survey.title}</strong>
+              <p className="muted">
+                Scores are reported only in anonymous aggregate views once the response threshold is
+                met.
+              </p>
+              {task.coaches.map((coach) => {
+                const key = `${task.survey.id}:${coach.profileId}`;
+                return (
+                  <div className="nps-coach-row" key={coach.profileId}>
+                    <div>
+                      <strong>{coach.name}</strong>
+                      <p className="muted">
+                        {coach.alreadyResponded ? "Response received" : "Score 0-10"}
+                      </p>
+                    </div>
+                    <div className="field compact-field">
+                      <label htmlFor={`nps-${key}`}>Score</label>
+                      <select
+                        id={`nps-${key}`}
+                        value={npsScores[key] ?? ""}
+                        onChange={(event) =>
+                          setNpsScores((current) => ({ ...current, [key]: event.target.value }))
+                        }
+                        disabled={coach.alreadyResponded}
+                      >
+                        <option value="">-</option>
+                        {Array.from({ length: 11 }, (_, score) => (
+                          <option key={score} value={score}>
+                            {score}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <TextField
+                      label={`NPS comment ${coach.name}`}
+                      value={npsComments[key] ?? ""}
+                      onChange={(value) =>
+                        setNpsComments((current) => ({ ...current, [key]: value }))
+                      }
+                      placeholder="Optional"
+                    />
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={coach.alreadyResponded}
+                      onClick={() => void submitNps(task, coach.profileId)}
+                    >
+                      Submit NPS
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </section>
+      ) : null}
+      {message ? <p className="alert ok">{message}</p> : null}
+      {enablePlayerGrowthMatrix ? (
+        <>
+          <div className="grid cols-2">
+            <TryoutBriefingPanel briefing={flow.briefing} />
+            <GrowthMatrixExplainer />
+          </div>
+          <section className="card stack growth-review-card">
+            <div className="section-title">
+              <h2>Latest quarterly placement</h2>
+              <Badge tone={latestReview ? growthStatusTone(latestReview.status) : "warn"}>
+                {latestReview?.status ?? "not shared"}
+              </Badge>
+            </div>
+            {latestReview ? (
+              <>
+                <GrowthReviewSummary review={latestReview} />
+                <div className="note-box">{latestReview.rationale}</div>
+                <p className="muted">
+                  Signed by {latestReview.signoffs.length} coach
+                  {latestReview.signoffs.length === 1 ? "" : "es"}. Results are shared with you and
+                  available for admin welfare-board reporting.
+                </p>
+                {latestReview.replies.length > 0 ? (
+                  <div className="stack">
+                    <strong>Your replies</strong>
+                    {latestReview.replies.map((growthReply) => (
+                      <p className="note-box" key={growthReply.id}>
+                        {growthReply.body}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="field">
+                  <label htmlFor="growth-right-of-reply">Formal right-of-reply</label>
+                  <textarea
+                    id="growth-right-of-reply"
+                    value={reply}
+                    onChange={(event) => setReply(event.target.value)}
+                    placeholder="Add context if you dispute this placement..."
+                  />
+                  <p className="hint">
+                    Submitting a reply records a dispute for human review. It does not change the
+                    placement automatically.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={reply.trim().length === 0}
+                  onClick={() => void submitReply(latestReview.id)}
+                >
+                  Submit reply
+                </button>
+              </>
+            ) : (
+              <p className="muted">
+                No matrix placement has been shared yet. Drafts and one-coach sign-offs are not
+                visible to players.
+              </p>
+            )}
+          </section>
+        </>
+      ) : null}
     </>
   );
 }
@@ -1076,20 +1379,25 @@ function GrowthReviewSummary({ review }: { review: GrowthReviewWithDetails }) {
 function AdminDashboard() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [summary, setSummary] = useState<CampaignOperatingSummary | null>(null);
   const [rows, setRows] = useState<CampaignReadinessEntry[]>([]);
   const [requests, setRequests] = useState<ChangeRequestView[]>([]);
 
   useEffect(() => {
     void Promise.all([api.getAdminStats(), api.listCampaigns(), api.listChangeRequests()]).then(
       async ([nextStats, campaigns, nextRequests]) => {
-        const primaryCampaign =
-          campaigns.find((nextCampaign) => nextCampaign.status === "active") ??
-          campaigns[0] ??
-          null;
+        const primaryCampaign = pickPrimaryCampaign(campaigns);
         setStats(nextStats);
         setCampaign(primaryCampaign);
         setRequests(nextRequests);
-        setRows(primaryCampaign ? await api.getCampaignReadiness(primaryCampaign.id) : []);
+        const [nextRows, nextSummary] = primaryCampaign
+          ? await Promise.all([
+              api.getCampaignReadiness(primaryCampaign.id),
+              api.getCampaignOperatingSummary(primaryCampaign.id),
+            ])
+          : [[], null];
+        setRows(nextRows);
+        setSummary(nextSummary);
       },
     );
   }, []);
@@ -1117,8 +1425,8 @@ function AdminDashboard() {
     <>
       <PageHead
         title="Admin Dashboard"
-        subtitle="What needs attention before this squad can travel, compete, and be submitted."
-        eyebrow="Readiness control room"
+        subtitle="U24 campaign operations from training start through competition closeout."
+        eyebrow="Campaign command center"
         actions={
           <>
             <Link className="btn" to="/admin/review">
@@ -1175,6 +1483,18 @@ function AdminDashboard() {
             <strong>{pendingEvaluationRows.length}</strong>
             <span>Evaluations pending</span>
           </div>
+          {enableCampaignEvaluationMatrix ? (
+            <div>
+              <strong>{summary?.playerMatrixSubmittedCount ?? 0}</strong>
+              <span>Player matrices submitted</span>
+            </div>
+          ) : null}
+          {enableCampaignNps ? (
+            <div>
+              <strong>{summary?.openNpsSurveyCount ?? 0}</strong>
+              <span>Open NPS surveys</span>
+            </div>
+          ) : null}
         </div>
         <div className="ops-lanes">
           <section className="ops-lane">
@@ -1472,6 +1792,9 @@ function AdminCampaignDetailPage() {
   const [drafts, setDrafts] = useState<AssistantDraft[]>([]);
   const [briefing, setBriefing] = useState<CampaignTryoutBriefing | null>(null);
   const [growthReviews, setGrowthReviews] = useState<GrowthReviewWithDetails[]>([]);
+  const [matrixRows, setMatrixRows] = useState<CampaignMatrixStatusRow[]>([]);
+  const [auditEvents, setAuditEvents] = useState<EvaluationAuditEvent[]>([]);
+  const [npsReport, setNpsReport] = useState<NpsCoachReportRow[]>([]);
   const [drafting, setDrafting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [assistantResponse, setAssistantResponse] = useState<string | null>(null);
@@ -1497,6 +1820,17 @@ function AdminCampaignDetailPage() {
     setCampaign(nextCampaign);
     setRows(nextRows);
     setAthletes(nextAthletes);
+    if (enableCampaignEvaluationMatrix) {
+      const [nextMatrixRows, nextAuditEvents] = await Promise.all([
+        api.getCampaignMatrixStatus(campaignId),
+        api.listEvaluationAuditEvents(campaignId),
+      ]);
+      setMatrixRows(nextMatrixRows);
+      setAuditEvents(nextAuditEvents);
+    }
+    if (enableCampaignNps) {
+      setNpsReport(await api.getNpsReport(campaignId));
+    }
     void loadGrowthMatrixAdmin();
   }, [campaignId, loadGrowthMatrixAdmin]);
 
@@ -1621,6 +1955,27 @@ function AdminCampaignDetailPage() {
     await loadCampaignDetail();
   }
 
+  async function handleSaveNpsSurvey(
+    window: "mid_season" | "post_season",
+    status: "open" | "closed",
+  ) {
+    if (!profile || !campaign) {
+      return;
+    }
+    await api.saveNpsSurvey({
+      campaignId,
+      title: `${campaign.name} ${window === "mid_season" ? "mid-season" : "post-season"} coach NPS`,
+      window,
+      status,
+      opensAt: status === "open" ? new Date().toISOString() : null,
+      closesAt: status === "closed" ? new Date().toISOString() : null,
+      minResponseCount: 3,
+      createdBy: profile.id,
+    });
+    setMessage(`NPS survey ${status === "open" ? "opened" : "closed"}.`);
+    setNpsReport(await api.getNpsReport(campaignId));
+  }
+
   return (
     <>
       <PageHead
@@ -1725,6 +2080,18 @@ function AdminCampaignDetailPage() {
           briefing={briefing}
           reviews={growthReviews}
           onShare={(reviewId) => void handleShareGrowthReview(reviewId)}
+        />
+      ) : null}
+      {enableCampaignEvaluationMatrix ? (
+        <AdminLiveMatrixPanel rows={matrixRows} auditEvents={auditEvents} />
+      ) : null}
+      {enableCampaignNps ? (
+        <AdminNpsPanel
+          report={npsReport}
+          onOpenMid={() => void handleSaveNpsSurvey("mid_season", "open")}
+          onOpenPost={() => void handleSaveNpsSurvey("post_season", "open")}
+          onCloseMid={() => void handleSaveNpsSurvey("mid_season", "closed")}
+          onClosePost={() => void handleSaveNpsSurvey("post_season", "closed")}
         />
       ) : null}
       <section className="card stack assistant-card">
@@ -1936,6 +2303,151 @@ function AdminGrowthMatrixPanel({
       <p className="muted">
         Sharing requires two distinct coach sign-offs. Player replies record disputes for human
         review and do not alter the placement automatically.
+      </p>
+    </section>
+  );
+}
+
+function AdminLiveMatrixPanel({
+  rows,
+  auditEvents,
+}: {
+  rows: CampaignMatrixStatusRow[];
+  auditEvents: EvaluationAuditEvent[];
+}) {
+  const playerSubmitted = rows.filter((row) => row.playerStatus === "submitted").length;
+  const coachSubmitted = rows.reduce((total, row) => total + row.submittedCoachCount, 0);
+
+  return (
+    <section className="card stack">
+      <div className="section-title">
+        <h2>U24 live evaluation matrix</h2>
+        <Badge>
+          {playerSubmitted}/{rows.length || 0} player
+        </Badge>
+      </div>
+      <div className="grid cols-3">
+        <StatCard
+          label="Player self-evaluations"
+          value={playerSubmitted}
+          detail="Submitted by campaign athletes"
+          tone={playerSubmitted === rows.length ? "ok" : "warn"}
+        />
+        <StatCard
+          label="Coach assessments"
+          value={coachSubmitted}
+          detail="Submitted coach-player records"
+          tone="accent"
+        />
+        <StatCard
+          label="Audit events"
+          value={auditEvents.length}
+          detail="Matrix create/update/submit trail"
+          tone="neutral"
+        />
+      </div>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Player matrix</th>
+              <th>Coach submissions</th>
+              <th>Player notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.athleteId}>
+                <td>{row.athleteName}</td>
+                <td>{row.playerStatus}</td>
+                <td>{row.submittedCoachCount}</td>
+                <td>{row.playerSubmission?.development_focus ?? "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {auditEvents.length > 0 ? (
+        <div className="stack">
+          <strong>Recent audit trail</strong>
+          <ul className="compact-list">
+            {auditEvents.slice(0, 5).map((event) => (
+              <li key={event.id}>
+                <strong>{event.event_type}</strong>
+                <span>
+                  {event.entity_type.replaceAll("_", " ")} ·{" "}
+                  {new Date(event.created_at).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function AdminNpsPanel({
+  report,
+  onOpenMid,
+  onOpenPost,
+  onCloseMid,
+  onClosePost,
+}: {
+  report: NpsCoachReportRow[];
+  onOpenMid: () => void;
+  onOpenPost: () => void;
+  onCloseMid: () => void;
+  onClosePost: () => void;
+}) {
+  return (
+    <section className="card stack">
+      <div className="section-title">
+        <h2>Coach NPS</h2>
+        <Badge>anonymous aggregate</Badge>
+      </div>
+      <div className="btn-row">
+        <button type="button" className="btn" onClick={onOpenMid}>
+          Open mid-season NPS
+        </button>
+        <button type="button" className="btn" onClick={onOpenPost}>
+          Open post-season NPS
+        </button>
+        <button type="button" className="btn" onClick={onCloseMid}>
+          Close mid-season
+        </button>
+        <button type="button" className="btn" onClick={onClosePost}>
+          Close post-season
+        </button>
+      </div>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Survey</th>
+              <th>Coach</th>
+              <th>Responses</th>
+              <th>Average</th>
+              <th>NPS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.map((row) => (
+              <tr key={`${row.surveyId}-${row.coachProfileId}`}>
+                <td>{row.surveyTitle}</td>
+                <td>{row.coachName}</td>
+                <td>{row.responseCount}</td>
+                <td>{row.withheld ? "Withheld" : row.averageScore}</td>
+                <td>{row.withheld ? "Threshold not met" : row.nps}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted">
+        Raw player responses are not shown here. Coach KPI reporting unlocks only once the survey
+        threshold is met.
       </p>
     </section>
   );
@@ -2218,6 +2730,8 @@ function CoachDashboard() {
     });
   }, [profile]);
 
+  const primaryCampaign = pickPrimaryCampaign(campaigns);
+
   return (
     <>
       <PageHead
@@ -2225,8 +2739,8 @@ function CoachDashboard() {
         subtitle="Assigned campaigns and evaluation progress."
         eyebrow="Coach workspace"
         actions={
-          campaigns[0] ? (
-            <Link className="btn primary" to={`/coach/campaigns/${campaigns[0].id}`}>
+          primaryCampaign ? (
+            <Link className="btn primary" to={`/coach/campaigns/${primaryCampaign.id}`}>
               Open campaign
             </Link>
           ) : null
@@ -2258,10 +2772,80 @@ function CoachDashboard() {
   );
 }
 
+interface CoachMatrixFormState {
+  id?: string;
+  athleteId: string;
+  skillScore: string;
+  growthScore: string;
+  readinessScore: string;
+  tacticalScore: string;
+  strengths: string;
+  developmentFocus: string;
+  coachNotes: string;
+  status: MatrixSubmissionStatus;
+}
+
+const emptyCoachMatrixForm: CoachMatrixFormState = {
+  athleteId: "",
+  skillScore: "3",
+  growthScore: "3",
+  readinessScore: "3",
+  tacticalScore: "3",
+  strengths: "",
+  developmentFocus: "",
+  coachNotes: "",
+  status: "draft",
+};
+
+function coachMatrixFormFromAssessment(
+  assessment: CoachMatrixAssessment | null,
+  athleteId: string,
+): CoachMatrixFormState {
+  return {
+    id: assessment?.id,
+    athleteId,
+    skillScore: assessment?.skill_score ? String(assessment.skill_score) : "3",
+    growthScore: assessment?.growth_score ? String(assessment.growth_score) : "3",
+    readinessScore: assessment?.readiness_score ? String(assessment.readiness_score) : "3",
+    tacticalScore: assessment?.tactical_score ? String(assessment.tactical_score) : "3",
+    strengths: assessment?.strengths ?? "",
+    developmentFocus: assessment?.development_focus ?? "",
+    coachNotes: assessment?.coach_notes ?? "",
+    status: assessment?.status ?? "draft",
+  };
+}
+
+function coachMatrixInputFromForm(
+  form: CoachMatrixFormState,
+  input: {
+    campaignId: string;
+    coachProfileId: string;
+    status: MatrixSubmissionStatus;
+  },
+): CoachMatrixInput {
+  return {
+    id: form.id,
+    campaignId: input.campaignId,
+    athleteId: form.athleteId,
+    coachProfileId: input.coachProfileId,
+    skillScore: ratingValue(form.skillScore),
+    growthScore: ratingValue(form.growthScore),
+    readinessScore: ratingValue(form.readinessScore),
+    tacticalScore: ratingValue(form.tacticalScore),
+    strengths: optionalText(form.strengths),
+    developmentFocus: optionalText(form.developmentFocus),
+    coachNotes: optionalText(form.coachNotes),
+    status: input.status,
+  };
+}
+
 function CoachCampaignPage() {
   const { campaignId = "" } = useParams();
   const { profile } = useAuth();
   const [athletes, setAthletes] = useState<CoachAthleteView[]>([]);
+  const [matrixRows, setMatrixRows] = useState<CampaignMatrixStatusRow[]>([]);
+  const [coachMatrixForm, setCoachMatrixForm] =
+    useState<CoachMatrixFormState>(emptyCoachMatrixForm);
   const [growthReviews, setGrowthReviews] = useState<GrowthReviewWithDetails[]>([]);
   const [growthForm, setGrowthForm] = useState<GrowthMatrixFormState>(emptyGrowthMatrixForm);
   const [message, setMessage] = useState<string | null>(null);
@@ -2276,9 +2860,17 @@ function CoachCampaignPage() {
         ? api.getCoachGrowthReviews(campaignId, profile.id)
         : Promise.resolve([]),
     ]);
+    const nextMatrixRows = enableCampaignEvaluationMatrix
+      ? await api.getCampaignMatrixStatus(campaignId)
+      : [];
     setAthletes(nextAthletes);
     setGrowthReviews(nextGrowthReviews);
+    setMatrixRows(nextMatrixRows);
     setGrowthForm((current) => ({
+      ...current,
+      athleteId: current.athleteId || nextAthletes[0]?.id || "",
+    }));
+    setCoachMatrixForm((current) => ({
       ...current,
       athleteId: current.athleteId || nextAthletes[0]?.id || "",
     }));
@@ -2290,6 +2882,18 @@ function CoachCampaignPage() {
 
   function updateGrowthForm(field: keyof GrowthMatrixFormState, value: string) {
     setGrowthForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateCoachMatrixForm(field: keyof CoachMatrixFormState, value: string) {
+    setCoachMatrixForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function selectCoachMatrixAthlete(athleteId: string) {
+    if (!profile) {
+      return;
+    }
+    const assessment = await api.getCoachMatrixAssessment(campaignId, athleteId, profile.id);
+    setCoachMatrixForm(coachMatrixFormFromAssessment(assessment, athleteId));
   }
 
   function editGrowthReview(review: GrowthReviewWithDetails) {
@@ -2338,6 +2942,23 @@ function CoachCampaignPage() {
     await load();
   }
 
+  async function saveCoachMatrix(status: MatrixSubmissionStatus) {
+    if (!profile || !coachMatrixForm.athleteId) {
+      setMessage("Choose a player before saving a matrix assessment.");
+      return;
+    }
+    const saved = await api.saveCoachMatrixAssessment(
+      coachMatrixInputFromForm(coachMatrixForm, {
+        campaignId,
+        coachProfileId: profile.id,
+        status,
+      }),
+    );
+    setCoachMatrixForm(coachMatrixFormFromAssessment(saved, saved.athlete_id));
+    setMessage(status === "submitted" ? "Matrix assessment submitted." : "Matrix draft saved.");
+    await load();
+  }
+
   const latestReviewByAthlete = new Map<string, GrowthReviewWithDetails>();
   for (const review of growthReviews) {
     if (!latestReviewByAthlete.has(review.athlete_id)) {
@@ -2359,6 +2980,8 @@ function CoachCampaignPage() {
               <th>Player</th>
               <th>Phone</th>
               <th>Profile</th>
+              {enableCampaignEvaluationMatrix ? <th>Player matrix</th> : null}
+              {enableCampaignEvaluationMatrix ? <th>Coach matrix</th> : null}
               {enablePlayerGrowthMatrix ? <th>Growth Matrix</th> : null}
               <th>Action</th>
             </tr>
@@ -2366,11 +2989,28 @@ function CoachCampaignPage() {
           <tbody>
             {athletes.map((athlete) => {
               const growthReview = latestReviewByAthlete.get(athlete.id);
+              const matrixRow = matrixRows.find((row) => row.athleteId === athlete.id);
               return (
                 <tr key={athlete.id}>
                   <td>{athlete.preferred_name || athlete.legal_name || "Unknown athlete"}</td>
                   <td>{athlete.phone ?? "-"}</td>
                   <td>{athlete.profile_status}</td>
+                  {enableCampaignEvaluationMatrix ? (
+                    <td>{matrixRow?.playerStatus ?? "not_started"}</td>
+                  ) : null}
+                  {enableCampaignEvaluationMatrix ? (
+                    <td>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => void selectCoachMatrixAthlete(athlete.id)}
+                      >
+                        {matrixRow?.coachAssessments.find(
+                          (assessment) => assessment.coach_profile_id === profile?.id,
+                        )?.status ?? "draft"}
+                      </button>
+                    </td>
+                  ) : null}
                   {enablePlayerGrowthMatrix ? (
                     <td>
                       {growthReview ? (
@@ -2405,6 +3045,90 @@ function CoachCampaignPage() {
           </tbody>
         </table>
       </section>
+      {enableCampaignEvaluationMatrix ? (
+        <section className="card stack">
+          <div className="section-title">
+            <h2>U24 coach matrix assessment</h2>
+            <Badge tone={coachMatrixForm.status === "submitted" ? "ok" : "warn"}>
+              {coachMatrixForm.status}
+            </Badge>
+          </div>
+          <div className="grid cols-2">
+            <div className="field">
+              <label htmlFor="coach-matrix-athlete">Player</label>
+              <select
+                id="coach-matrix-athlete"
+                value={coachMatrixForm.athleteId}
+                onChange={(event) => void selectCoachMatrixAthlete(event.target.value)}
+              >
+                {athletes.map((athlete) => (
+                  <option key={athlete.id} value={athlete.id}>
+                    {athlete.preferred_name || athlete.legal_name || "Unknown athlete"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="note-box">
+              {matrixRows.find((row) => row.athleteId === coachMatrixForm.athleteId)
+                ?.playerSubmission?.strengths ??
+                "Player self-evaluation has not been submitted yet."}
+            </div>
+          </div>
+          <div className="grid cols-4">
+            <RatingField
+              label="Skill"
+              value={coachMatrixForm.skillScore}
+              onChange={(value) => updateCoachMatrixForm("skillScore", value)}
+            />
+            <RatingField
+              label="Growth"
+              value={coachMatrixForm.growthScore}
+              onChange={(value) => updateCoachMatrixForm("growthScore", value)}
+            />
+            <RatingField
+              label="Readiness"
+              value={coachMatrixForm.readinessScore}
+              onChange={(value) => updateCoachMatrixForm("readinessScore", value)}
+            />
+            <RatingField
+              label="Tactical"
+              value={coachMatrixForm.tacticalScore}
+              onChange={(value) => updateCoachMatrixForm("tacticalScore", value)}
+            />
+          </div>
+          <TextAreaField
+            label="Strengths observed"
+            value={coachMatrixForm.strengths}
+            onChange={(value) => updateCoachMatrixForm("strengths", value)}
+          />
+          <TextAreaField
+            label="Development focus"
+            value={coachMatrixForm.developmentFocus}
+            onChange={(value) => updateCoachMatrixForm("developmentFocus", value)}
+          />
+          <TextAreaField
+            label="Coach notes"
+            value={coachMatrixForm.coachNotes}
+            onChange={(value) => updateCoachMatrixForm("coachNotes", value)}
+          />
+          <div className="btn-row">
+            <button type="button" className="btn" onClick={() => void saveCoachMatrix("draft")}>
+              Save matrix draft
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => void saveCoachMatrix("submitted")}
+            >
+              Submit matrix assessment
+            </button>
+          </div>
+          <p className="muted">
+            Each save is recorded in the evaluation audit trail. This does not expose admin
+            sensitive player fields.
+          </p>
+        </section>
+      ) : null}
       {enablePlayerGrowthMatrix ? (
         <section className="card stack">
           <div className="section-title">

@@ -5,12 +5,18 @@ import type {
   Campaign,
   CampaignCoach,
   CampaignMember,
+  CampaignNpsAssignment,
+  CampaignNpsResponse,
+  CampaignNpsSurvey,
   CampaignTryoutBriefing,
   ChangeRequest,
   CoachEvaluation,
+  CoachMatrixAssessment,
   CoachNoteGenerationRun,
   CoachNoteSession,
   CoachNoteTurn,
+  EvaluationAuditEvent,
+  PlayerMatrixSubmission,
   PlayerGrowthReply,
   PlayerGrowthReview,
   PlayerGrowthSignoff,
@@ -33,6 +39,12 @@ export interface MockData {
   coachNoteGenerationRuns: CoachNoteGenerationRun[];
   coachNoteSessions: CoachNoteSession[];
   coachNoteTurns: CoachNoteTurn[];
+  playerMatrixSubmissions: PlayerMatrixSubmission[];
+  coachMatrixAssessments: CoachMatrixAssessment[];
+  evaluationAuditEvents: EvaluationAuditEvent[];
+  npsSurveys: CampaignNpsSurvey[];
+  npsAssignments: CampaignNpsAssignment[];
+  npsResponses: CampaignNpsResponse[];
 }
 
 const TS = "2026-01-01T00:00:00.000Z";
@@ -148,6 +160,18 @@ export function buildSeed(): MockData {
     },
     {
       id: "c-u24",
+      name: "U24 Worlds 2026",
+      team: "U24 Mixed",
+      start_date: "2026-02-01",
+      end_date: "2026-07-12",
+      location: "Worlds campaign",
+      status: "active",
+      created_by: "p-admin",
+      created_at: TS,
+      updated_at: TS,
+    },
+    {
+      id: "c-u24-2025",
       name: "U24 Nationals 2025",
       team: "Mixed",
       start_date: "2025-03-01",
@@ -164,6 +188,27 @@ export function buildSeed(): MockData {
     { id: "m-1", campaign_id: "c-sea", athlete_id: "a-alice", status: "selected", created_at: TS },
     { id: "m-2", campaign_id: "c-sea", athlete_id: "a-ben", status: "invited", created_at: TS },
     { id: "m-3", campaign_id: "c-sea", athlete_id: "a-cara", status: "registered", created_at: TS },
+    {
+      id: "m-u24-1",
+      campaign_id: "c-u24",
+      athlete_id: "a-alice",
+      status: "selected",
+      created_at: TS,
+    },
+    {
+      id: "m-u24-2",
+      campaign_id: "c-u24",
+      athlete_id: "a-ben",
+      status: "selected",
+      created_at: TS,
+    },
+    {
+      id: "m-u24-3",
+      campaign_id: "c-u24",
+      athlete_id: "a-cara",
+      status: "selected",
+      created_at: TS,
+    },
   ];
 
   const campaignCoaches: CampaignCoach[] = [
@@ -181,12 +226,26 @@ export function buildSeed(): MockData {
       coach_role: "assistant_coach",
       created_at: TS,
     },
+    {
+      id: "cc-u24-1",
+      campaign_id: "c-u24",
+      coach_profile_id: "p-coach",
+      coach_role: "head_coach",
+      created_at: TS,
+    },
+    {
+      id: "cc-u24-2",
+      campaign_id: "c-u24",
+      coach_profile_id: "p-coach-2",
+      coach_role: "assistant_coach",
+      created_at: TS,
+    },
   ];
 
   const evaluations: CoachEvaluation[] = [
     {
       id: "eval-alice-u24",
-      campaign_id: "c-u24",
+      campaign_id: "c-u24-2025",
       athlete_id: "a-alice",
       coach_profile_id: "p-coach",
       throwing_rating: 4,
@@ -298,6 +357,131 @@ export function buildSeed(): MockData {
 
   const growthReplies: PlayerGrowthReply[] = [];
 
+  const playerMatrixSubmissions: PlayerMatrixSubmission[] = [
+    {
+      id: "pms-alice-u24",
+      campaign_id: "c-u24",
+      athlete_id: "a-alice",
+      submitted_by: "p-alice",
+      skill_score: 4,
+      growth_score: 5,
+      readiness_score: 4,
+      confidence_score: 4,
+      strengths: "Throwing range, defensive intensity, and communication in small-sided reps.",
+      development_focus: "Keep improving reset timing against stronger marks.",
+      support_needed: "More reps with the likely O-line handlers.",
+      status: "submitted",
+      submitted_at: "2026-02-10T00:00:00.000Z",
+      created_at: TS,
+      updated_at: "2026-02-10T00:00:00.000Z",
+    },
+  ];
+
+  const coachMatrixAssessments: CoachMatrixAssessment[] = [
+    {
+      id: "cma-alice-u24",
+      campaign_id: "c-u24",
+      athlete_id: "a-alice",
+      coach_profile_id: "p-coach",
+      skill_score: 4,
+      growth_score: 4,
+      readiness_score: 4,
+      tactical_score: 4,
+      strengths: "Reliable under pressure and asks specific questions after reps.",
+      development_focus: "Defensive reset positioning.",
+      coach_notes: "Strong baseline for U24 Worlds training block.",
+      status: "submitted",
+      submitted_at: "2026-02-12T00:00:00.000Z",
+      created_at: TS,
+      updated_at: "2026-02-12T00:00:00.000Z",
+    },
+  ];
+
+  const evaluationAuditEvents: EvaluationAuditEvent[] = [
+    {
+      id: "eae-alice-player-submit",
+      campaign_id: "c-u24",
+      athlete_id: "a-alice",
+      actor_profile_id: "p-alice",
+      actor_role: "player",
+      event_type: "submitted",
+      entity_type: "player_matrix_submission",
+      entity_id: "pms-alice-u24",
+      metadata: { source: "seed" },
+      created_at: "2026-02-10T00:00:00.000Z",
+    },
+    {
+      id: "eae-alice-coach-submit",
+      campaign_id: "c-u24",
+      athlete_id: "a-alice",
+      actor_profile_id: "p-coach",
+      actor_role: "coach",
+      event_type: "submitted",
+      entity_type: "coach_matrix_assessment",
+      entity_id: "cma-alice-u24",
+      metadata: { source: "seed" },
+      created_at: "2026-02-12T00:00:00.000Z",
+    },
+  ];
+
+  const npsSurveys: CampaignNpsSurvey[] = [
+    {
+      id: "nps-u24-mid",
+      campaign_id: "c-u24",
+      title: "U24 Worlds mid-season coach NPS",
+      survey_window: "mid_season",
+      status: "open",
+      opens_at: "2026-04-01T00:00:00.000Z",
+      closes_at: "2026-04-15T00:00:00.000Z",
+      min_response_count: 3,
+      created_by: "p-admin",
+      created_at: TS,
+      updated_at: TS,
+    },
+    {
+      id: "nps-u24-post",
+      campaign_id: "c-u24",
+      title: "U24 Worlds post-season coach NPS",
+      survey_window: "post_season",
+      status: "draft",
+      opens_at: null,
+      closes_at: null,
+      min_response_count: 3,
+      created_by: "p-admin",
+      created_at: TS,
+      updated_at: TS,
+    },
+  ];
+
+  const npsAssignments: CampaignNpsAssignment[] = [
+    {
+      id: "npsa-u24-mid-alice",
+      survey_id: "nps-u24-mid",
+      athlete_id: "a-alice",
+      status: "pending",
+      completed_at: null,
+      created_at: TS,
+    },
+    {
+      id: "npsa-u24-mid-ben",
+      survey_id: "nps-u24-mid",
+      athlete_id: "a-ben",
+      status: "pending",
+      completed_at: null,
+      created_at: TS,
+    },
+    {
+      id: "npsa-u24-mid-cara",
+      survey_id: "nps-u24-mid",
+      athlete_id: "a-cara",
+      status: "pending",
+      completed_at: null,
+      created_at: TS,
+    },
+  ];
+
+  const npsResponses: CampaignNpsResponse[] = [];
+
   return {
     profiles,
     athletes,
@@ -314,5 +498,11 @@ export function buildSeed(): MockData {
     coachNoteGenerationRuns: [],
     coachNoteSessions: [],
     coachNoteTurns: [],
+    playerMatrixSubmissions,
+    coachMatrixAssessments,
+    evaluationAuditEvents,
+    npsSurveys,
+    npsAssignments,
+    npsResponses,
   };
 }

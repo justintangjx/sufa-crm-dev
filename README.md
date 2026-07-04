@@ -41,6 +41,8 @@ Command details: `docs/tooling.md`.
 | ------------------------------------ | -------------------------------------------------------- |
 | Changing product behaviour           | `prd.md`                                                 |
 | Coding in this repo (human or agent) | `AGENTS.md`, then `docs/context.md`                      |
+| U24 campaign architecture/decisions  | `docs/campaign-architecture.md`                          |
+| Future cleanup/refactor planning     | `docs/cleanup-refactor-plan.md`                          |
 | Coach LLM / evals                    | `docs/coach-llm.md`                                      |
 | Deploying Cloudflare + Supabase      | `docs/context.md` (Deployment, Demo coach with live LLM) |
 | Google Sheets export (planned)       | `docs/google-sheets-snapshots.md`                        |

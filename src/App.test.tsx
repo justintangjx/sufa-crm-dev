@@ -4,6 +4,20 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { api, resetData } from "./data";
 import { TestApp } from "./App";
 
+async function submitNpsFor(profileId: string, score: number) {
+  const athlete = await api.getAthleteForProfile(profileId);
+  const task = (await api.listPlayerNpsTasks(profileId, "c-u24"))[0];
+  expect(athlete).not.toBeNull();
+  expect(task).toBeDefined();
+  await api.submitNpsResponse({
+    surveyId: "nps-u24-mid",
+    assignmentId: task?.assignmentId ?? "",
+    athleteId: athlete?.id ?? "",
+    targetCoachProfileId: "p-coach",
+    score,
+  });
+}
+
 describe("App routing", () => {
   beforeEach(() => {
     resetData();
@@ -17,7 +31,7 @@ describe("App routing", () => {
     await user.click(screen.getByRole("button", { name: /send magic link/i }));
 
     expect(await screen.findByRole("heading", { name: /admin dashboard/i })).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /u24 worlds 2026/i })).toBeInTheDocument();
     expect(await screen.findByText(/players travel-ready/i)).toBeInTheDocument();
     expect(screen.getByText(/next admin actions/i)).toBeInTheDocument();
   });
@@ -27,7 +41,9 @@ describe("App routing", () => {
 
     render(<TestApp initialEntries={["/admin"]} />);
 
-    expect(await screen.findByRole("heading", { name: /player dashboard/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /player campaign hub/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /admin dashboard/i })).not.toBeInTheDocument();
   });
 
@@ -76,8 +92,10 @@ describe("App routing", () => {
 
     await user.click(await screen.findByRole("button", { name: /player \(derrick\)/i }));
 
-    expect(await screen.findByRole("heading", { name: /player dashboard/i })).toBeInTheDocument();
-    expect(screen.getByText(/7 items are blocking campaign readiness/i)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /player campaign hub/i }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText(/7 items are blocking campaign readiness/i)).toBeInTheDocument();
 
     const athlete = await api.getAthleteForProfile("p-derrick");
     expect(athlete?.legal_name).toBeNull();
@@ -256,9 +274,70 @@ describe("App routing", () => {
     expect(
       await screen.findByRole("heading", { name: /player growth matrix/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/briefing published/i)).toBeInTheDocument();
+    expect(await screen.findByText(/briefing published/i)).toBeInTheDocument();
     expect(screen.getByText(/Right-of-reply records/i)).toBeInTheDocument();
     expect(screen.getByText(/Shared placements for report/i)).toBeInTheDocument();
+  });
+
+  it("records player and coach live matrix submissions with audit events", async () => {
+    await api.savePlayerMatrixSubmission({
+      campaignId: "c-u24",
+      athleteId: "a-ben",
+      submittedBy: "p-ben",
+      skillScore: 3,
+      growthScore: 4,
+      readinessScore: 3,
+      confidenceScore: 4,
+      strengths: "Quick first steps and positive sideline communication.",
+      developmentFocus: "More consistent reset timing.",
+      supportNeeded: "Extra handler-defender reps.",
+      status: "submitted",
+    });
+
+    await api.saveCoachMatrixAssessment({
+      campaignId: "c-u24",
+      athleteId: "a-ben",
+      coachProfileId: "p-coach",
+      skillScore: 3,
+      growthScore: 4,
+      readinessScore: 3,
+      tacticalScore: 3,
+      strengths: "Takes feedback well and applies it within the same session.",
+      developmentFocus: "Spacing discipline against zone looks.",
+      coachNotes: "Good U24 Worlds training candidate with clear development priorities.",
+      status: "submitted",
+    });
+
+    const rows = await api.getCampaignMatrixStatus("c-u24");
+    const ben = rows.find((row) => row.athleteId === "a-ben");
+    expect(ben?.playerStatus).toBe("submitted");
+    expect(ben?.submittedCoachCount).toBe(1);
+
+    const auditEvents = await api.listEvaluationAuditEvents("c-u24");
+    expect(auditEvents.map((event) => event.event_type)).toEqual(
+      expect.arrayContaining(["submitted"]),
+    );
+    expect(auditEvents.some((event) => event.actor_role === "coach")).toBe(true);
+  });
+
+  it("withholds NPS aggregates until the anonymity threshold is met", async () => {
+    let report = await api.getNpsReport("c-u24");
+    const coachLimMid = () =>
+      report.find((row) => row.surveyId === "nps-u24-mid" && row.coachProfileId === "p-coach");
+    expect(coachLimMid()?.withheld).toBe(true);
+
+    await submitNpsFor("p-alice", 10);
+    await submitNpsFor("p-ben", 9);
+    report = await api.getNpsReport("c-u24");
+    expect(coachLimMid()?.withheld).toBe(true);
+
+    await submitNpsFor("p-cara", 6);
+    report = await api.getNpsReport("c-u24");
+    expect(coachLimMid()).toMatchObject({
+      responseCount: 3,
+      withheld: false,
+      nps: 33,
+    });
   });
 
   it("lets a coach structure rough notes and submit an evaluation", async () => {

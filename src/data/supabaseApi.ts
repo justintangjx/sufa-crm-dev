@@ -12,6 +12,11 @@ import { getPassportStatus } from "../lib/passport";
 import { supabase } from "../lib/supabase";
 import { useRemoteCoachLlm } from "../lib/env";
 import {
+  aggregateNps,
+  auditEventForSave,
+  DEFAULT_NPS_MIN_RESPONSE_COUNT,
+} from "../lib/campaignManagement";
+import {
   invokeCoachNoteAction,
   recordRemoteCoachNoteEditMetrics,
   submitRemoteCoachNoteFeedback,
@@ -20,9 +25,15 @@ import type {
   AssistantDraft,
   Athlete,
   Campaign,
+  CampaignNpsAssignment,
+  CampaignNpsResponse,
+  CampaignNpsSurvey,
   CampaignTryoutBriefing,
   CoachAthleteView,
   CoachEvaluation,
+  CoachMatrixAssessment,
+  EvaluationAuditEvent,
+  PlayerMatrixSubmission,
   PlayerGrowthReply,
   PlayerGrowthReview,
   PlayerGrowthSignoff,
@@ -32,14 +43,22 @@ import type {
 import type {
   Api,
   AthletePatch,
+  CampaignMatrixStatusRow,
+  CampaignOperatingSummary,
   CampaignReadinessEntry,
   CampaignWithMembership,
   ChangeRequestView,
+  CoachMatrixInput,
   EvaluationInput,
   GrowthReviewInput,
   GrowthReviewWithDetails,
   NewAssistantDraft,
   NewCampaign,
+  NpsCoachReportRow,
+  NpsResponseInput,
+  NpsSurveyInput,
+  NpsTask,
+  PlayerMatrixInput,
   SignInResult,
   TryoutBriefingInput,
 } from "./types";
@@ -122,6 +141,81 @@ function briefingPayload(input: TryoutBriefingInput, updatedBy: string) {
     published: input.published,
     updated_by: updatedBy,
   };
+}
+
+function profileDisplayName(profile: Pick<Profile, "email" | "full_name" | "preferred_name">) {
+  return profile.preferred_name || profile.full_name || profile.email;
+}
+
+function playerMatrixPayload(input: PlayerMatrixInput) {
+  return {
+    campaign_id: input.campaignId,
+    athlete_id: input.athleteId,
+    submitted_by: input.submittedBy,
+    skill_score: input.skillScore ?? null,
+    growth_score: input.growthScore ?? null,
+    readiness_score: input.readinessScore ?? null,
+    confidence_score: input.confidenceScore ?? null,
+    strengths: input.strengths ?? null,
+    development_focus: input.developmentFocus ?? null,
+    support_needed: input.supportNeeded ?? null,
+    status: input.status,
+    submitted_at: input.status === "submitted" ? new Date().toISOString() : null,
+  };
+}
+
+function coachMatrixPayload(input: CoachMatrixInput) {
+  return {
+    campaign_id: input.campaignId,
+    athlete_id: input.athleteId,
+    coach_profile_id: input.coachProfileId,
+    skill_score: input.skillScore ?? null,
+    growth_score: input.growthScore ?? null,
+    readiness_score: input.readinessScore ?? null,
+    tactical_score: input.tacticalScore ?? null,
+    strengths: input.strengths ?? null,
+    development_focus: input.developmentFocus ?? null,
+    coach_notes: input.coachNotes ?? null,
+    status: input.status,
+    submitted_at: input.status === "submitted" ? new Date().toISOString() : null,
+  };
+}
+
+async function insertEvaluationAudit(input: {
+  campaignId: string;
+  athleteId: string;
+  actorProfileId: string;
+  actorRole: EvaluationAuditEvent["actor_role"];
+  eventType: EvaluationAuditEvent["event_type"];
+  entityType: EvaluationAuditEvent["entity_type"];
+  entityId: string;
+}) {
+  const { error } = await client().from("evaluation_audit_events").insert({
+    campaign_id: input.campaignId,
+    athlete_id: input.athleteId,
+    actor_profile_id: input.actorProfileId,
+    actor_role: input.actorRole,
+    event_type: input.eventType,
+    entity_type: input.entityType,
+    entity_id: input.entityId,
+  });
+  if (error) {
+    throw error;
+  }
+}
+
+async function listCampaignCoachProfiles(campaignId: string) {
+  const { data, error } = await client()
+    .from("campaign_coaches")
+    .select("coach_profile_id, profiles(id, email, full_name, preferred_name)")
+    .eq("campaign_id", campaignId);
+  if (error) {
+    throw error;
+  }
+  return (data ?? []) as unknown as {
+    coach_profile_id: string;
+    profiles: Pick<Profile, "email" | "full_name" | "id" | "preferred_name"> | null;
+  }[];
 }
 
 export const supabaseApi: Api = {
@@ -283,6 +377,388 @@ export const supabaseApi: Api = {
         evaluationStatus: (ev?.status as CampaignReadinessEntry["evaluationStatus"]) ?? null,
       };
     });
+  },
+
+  async getCampaignOperatingSummary(campaignId: string): Promise<CampaignOperatingSummary> {
+    const [campaign, readinessRows, matrixRows, surveys] = await Promise.all([
+      supabaseApi.getCampaign(campaignId),
+      supabaseApi.getCampaignReadiness(campaignId),
+      supabaseApi.getCampaignMatrixStatus(campaignId),
+      supabaseApi.listNpsSurveys(campaignId),
+    ]);
+    return {
+      campaign,
+      rosterCount: readinessRows.length,
+      profileReadyCount: readinessRows.filter((row) => row.missingFields.length === 0).length,
+      playerMatrixSubmittedCount: matrixRows.filter((row) => row.playerStatus === "submitted")
+        .length,
+      coachMatrixSubmittedCount: matrixRows.reduce(
+        (total, row) => total + row.submittedCoachCount,
+        0,
+      ),
+      openNpsSurveyCount: surveys.filter((survey) => survey.status === "open").length,
+    };
+  },
+
+  async getCampaignMatrixStatus(campaignId: string): Promise<CampaignMatrixStatusRow[]> {
+    const { data: members, error: membersError } = await client()
+      .from("campaign_members")
+      .select("status, athletes(id, legal_name, preferred_name)")
+      .eq("campaign_id", campaignId);
+    if (membersError) {
+      throw membersError;
+    }
+    const { data: submissions, error: submissionsError } = await client()
+      .from("player_matrix_submissions")
+      .select("*")
+      .eq("campaign_id", campaignId);
+    if (submissionsError) {
+      throw submissionsError;
+    }
+    const { data: assessments, error: assessmentsError } = await client()
+      .from("coach_matrix_assessments")
+      .select("*")
+      .eq("campaign_id", campaignId);
+    if (assessmentsError) {
+      throw assessmentsError;
+    }
+    const submissionRows = (submissions ?? []) as PlayerMatrixSubmission[];
+    const assessmentRows = (assessments ?? []) as CoachMatrixAssessment[];
+    return (
+      (members ?? []) as unknown as {
+        status: CampaignMatrixStatusRow["memberStatus"];
+        athletes: Pick<Athlete, "id" | "legal_name" | "preferred_name">;
+      }[]
+    ).map((member) => {
+      const playerSubmission =
+        submissionRows.find((submission) => submission.athlete_id === member.athletes.id) ?? null;
+      const coachAssessments = assessmentRows.filter(
+        (assessment) => assessment.athlete_id === member.athletes.id,
+      );
+      return {
+        athleteId: member.athletes.id,
+        athleteName: displayName(member.athletes),
+        memberStatus: member.status,
+        playerSubmission,
+        coachAssessments,
+        playerStatus: playerSubmission?.status ?? "not_started",
+        submittedCoachCount: coachAssessments.filter(
+          (assessment) => assessment.status === "submitted",
+        ).length,
+      };
+    });
+  },
+
+  async listEvaluationAuditEvents(campaignId: string) {
+    const { data, error } = await client()
+      .from("evaluation_audit_events")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .order("created_at", { ascending: false });
+    if (error) {
+      throw error;
+    }
+    return (data ?? []) as EvaluationAuditEvent[];
+  },
+
+  async getPlayerMatrixSubmission(campaignId: string, athleteId: string) {
+    const { data, error } = await client()
+      .from("player_matrix_submissions")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .eq("athlete_id", athleteId)
+      .maybeSingle();
+    if (error) {
+      throw error;
+    }
+    return (data as PlayerMatrixSubmission | null) ?? null;
+  },
+
+  async savePlayerMatrixSubmission(input: PlayerMatrixInput) {
+    const existing = await supabaseApi.getPlayerMatrixSubmission(input.campaignId, input.athleteId);
+    const eventType = auditEventForSave(existing, input.status);
+    const row = input.id
+      ? { id: input.id, ...playerMatrixPayload(input) }
+      : playerMatrixPayload(input);
+    const { data, error } = await client()
+      .from("player_matrix_submissions")
+      .upsert(row, { onConflict: "campaign_id,athlete_id" })
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    const saved = data as PlayerMatrixSubmission;
+    await insertEvaluationAudit({
+      campaignId: input.campaignId,
+      athleteId: input.athleteId,
+      actorProfileId: input.submittedBy,
+      actorRole: "player",
+      eventType,
+      entityType: "player_matrix_submission",
+      entityId: saved.id,
+    });
+    return saved;
+  },
+
+  async getCoachMatrixAssessment(campaignId: string, athleteId: string, coachProfileId: string) {
+    const { data, error } = await client()
+      .from("coach_matrix_assessments")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .eq("athlete_id", athleteId)
+      .eq("coach_profile_id", coachProfileId)
+      .maybeSingle();
+    if (error) {
+      throw error;
+    }
+    return (data as CoachMatrixAssessment | null) ?? null;
+  },
+
+  async saveCoachMatrixAssessment(input: CoachMatrixInput) {
+    const existing = await supabaseApi.getCoachMatrixAssessment(
+      input.campaignId,
+      input.athleteId,
+      input.coachProfileId,
+    );
+    const eventType = auditEventForSave(existing, input.status);
+    const row = input.id
+      ? { id: input.id, ...coachMatrixPayload(input) }
+      : coachMatrixPayload(input);
+    const { data, error } = await client()
+      .from("coach_matrix_assessments")
+      .upsert(row, { onConflict: "campaign_id,athlete_id,coach_profile_id" })
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    const saved = data as CoachMatrixAssessment;
+    await insertEvaluationAudit({
+      campaignId: input.campaignId,
+      athleteId: input.athleteId,
+      actorProfileId: input.coachProfileId,
+      actorRole: "coach",
+      eventType,
+      entityType: "coach_matrix_assessment",
+      entityId: saved.id,
+    });
+    return saved;
+  },
+
+  async listNpsSurveys(campaignId: string) {
+    const { data, error } = await client()
+      .from("campaign_nps_surveys")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .order("survey_window", { ascending: true });
+    if (error) {
+      throw error;
+    }
+    return (data ?? []) as CampaignNpsSurvey[];
+  },
+
+  async saveNpsSurvey(input: NpsSurveyInput) {
+    const { data: existing } = await client()
+      .from("campaign_nps_surveys")
+      .select("*")
+      .eq("campaign_id", input.campaignId)
+      .eq("survey_window", input.window)
+      .maybeSingle();
+    const payload = {
+      campaign_id: input.campaignId,
+      title: input.title,
+      survey_window: input.window,
+      status: input.status,
+      opens_at: input.opensAt ?? null,
+      closes_at: input.closesAt ?? null,
+      min_response_count: input.minResponseCount ?? DEFAULT_NPS_MIN_RESPONSE_COUNT,
+      created_by: input.createdBy,
+    };
+    const query = existing
+      ? client()
+          .from("campaign_nps_surveys")
+          .update(payload)
+          .eq("id", (existing as CampaignNpsSurvey).id)
+          .select("*")
+          .single()
+      : client().from("campaign_nps_surveys").insert(payload).select("*").single();
+    const { data, error } = await query;
+    if (error) {
+      throw error;
+    }
+    const survey = data as CampaignNpsSurvey;
+    const { data: members } = await client()
+      .from("campaign_members")
+      .select("athlete_id")
+      .eq("campaign_id", input.campaignId);
+    const assignments = ((members ?? []) as { athlete_id: string }[]).map((member) => ({
+      survey_id: survey.id,
+      athlete_id: member.athlete_id,
+    }));
+    if (assignments.length > 0) {
+      const { error: assignmentError } = await client()
+        .from("campaign_nps_assignments")
+        .upsert(assignments, { onConflict: "survey_id,athlete_id" });
+      if (assignmentError) {
+        throw assignmentError;
+      }
+    }
+    return survey;
+  },
+
+  async listPlayerNpsTasks(profileId: string, campaignId?: string) {
+    const athlete = await currentAthlete(profileId);
+    if (!athlete) {
+      return [];
+    }
+    let assignmentQuery = client()
+      .from("campaign_nps_assignments")
+      .select("*, campaign_nps_surveys(*)")
+      .eq("athlete_id", athlete.id);
+    if (campaignId) {
+      assignmentQuery = assignmentQuery.eq("campaign_nps_surveys.campaign_id", campaignId);
+    }
+    const { data: assignments, error } = await assignmentQuery;
+    if (error) {
+      throw error;
+    }
+    const openAssignments = (
+      (assignments ?? []) as unknown as (CampaignNpsAssignment & {
+        campaign_nps_surveys: CampaignNpsSurvey | null;
+      })[]
+    ).filter((assignment) => assignment.campaign_nps_surveys?.status === "open");
+    if (openAssignments.length === 0) {
+      return [];
+    }
+    const campaignIds = [
+      ...new Set(openAssignments.map((assignment) => assignment.campaign_nps_surveys?.campaign_id)),
+    ].filter((id): id is string => Boolean(id));
+    const coachEntries = await Promise.all(
+      campaignIds.map(
+        async (
+          nextCampaignId,
+        ): Promise<[string, Awaited<ReturnType<typeof listCampaignCoachProfiles>>]> => [
+          nextCampaignId,
+          await listCampaignCoachProfiles(nextCampaignId),
+        ],
+      ),
+    );
+    const coachesByCampaign = new Map<
+      string,
+      Awaited<ReturnType<typeof listCampaignCoachProfiles>>
+    >(coachEntries);
+    const { data: responses } = await client()
+      .from("campaign_nps_responses")
+      .select("*")
+      .eq("athlete_id", athlete.id);
+    const responseRows = (responses ?? []) as CampaignNpsResponse[];
+    return openAssignments.map((assignment): NpsTask => {
+      const survey = assignment.campaign_nps_surveys as CampaignNpsSurvey;
+      const coaches = coachesByCampaign.get(survey.campaign_id) ?? [];
+      return {
+        survey,
+        assignmentId: assignment.id,
+        status: assignment.status,
+        coaches: coaches.map((coach) => ({
+          profileId: coach.coach_profile_id,
+          name: coach.profiles ? profileDisplayName(coach.profiles) : coach.coach_profile_id,
+          alreadyResponded: responseRows.some(
+            (response) =>
+              response.survey_id === survey.id &&
+              response.target_coach_profile_id === coach.coach_profile_id,
+          ),
+        })),
+      };
+    });
+  },
+
+  async submitNpsResponse(input: NpsResponseInput) {
+    const { error } = await client()
+      .from("campaign_nps_responses")
+      .upsert(
+        {
+          survey_id: input.surveyId,
+          assignment_id: input.assignmentId,
+          athlete_id: input.athleteId,
+          target_coach_profile_id: input.targetCoachProfileId,
+          score: input.score,
+          comment: input.comment ?? null,
+        },
+        { onConflict: "survey_id,athlete_id,target_coach_profile_id" },
+      );
+    if (error) {
+      throw error;
+    }
+    const { data: survey } = await client()
+      .from("campaign_nps_surveys")
+      .select("campaign_id")
+      .eq("id", input.surveyId)
+      .single();
+    const coachProfiles = survey
+      ? await listCampaignCoachProfiles((survey as { campaign_id: string }).campaign_id)
+      : [];
+    const { data: responses } = await client()
+      .from("campaign_nps_responses")
+      .select("id")
+      .eq("survey_id", input.surveyId)
+      .eq("athlete_id", input.athleteId);
+    if ((responses ?? []).length >= coachProfiles.length && coachProfiles.length > 0) {
+      const { error: assignmentError } = await client()
+        .from("campaign_nps_assignments")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", input.assignmentId);
+      if (assignmentError) {
+        throw assignmentError;
+      }
+    }
+  },
+
+  async getNpsReport(campaignId: string): Promise<NpsCoachReportRow[]> {
+    const [surveys, coaches] = await Promise.all([
+      supabaseApi.listNpsSurveys(campaignId),
+      listCampaignCoachProfiles(campaignId),
+    ]);
+    if (surveys.length === 0 || coaches.length === 0) {
+      return [];
+    }
+    const { data: responses, error } = await client()
+      .from("campaign_nps_responses")
+      .select("*")
+      .in(
+        "survey_id",
+        surveys.map((survey) => survey.id),
+      );
+    if (error) {
+      throw error;
+    }
+    const responseRows = (responses ?? []) as CampaignNpsResponse[];
+    return surveys.flatMap((survey) =>
+      coaches.map((coach) => {
+        const aggregate = aggregateNps(
+          responseRows.filter(
+            (response) =>
+              response.survey_id === survey.id &&
+              response.target_coach_profile_id === coach.coach_profile_id,
+          ),
+          survey.min_response_count,
+        );
+        return {
+          surveyId: survey.id,
+          surveyTitle: survey.title,
+          surveyWindow: survey.survey_window,
+          coachProfileId: coach.coach_profile_id,
+          coachName: coach.profiles ? profileDisplayName(coach.profiles) : coach.coach_profile_id,
+          responseCount: aggregate.responseCount,
+          averageScore: aggregate.averageScore,
+          nps: aggregate.nps,
+          promoterCount: aggregate.promoterCount,
+          passiveCount: aggregate.passiveCount,
+          detractorCount: aggregate.detractorCount,
+          withheld: aggregate.withheld,
+        };
+      }),
+    );
   },
 
   async listChangeRequests(): Promise<ChangeRequestView[]> {
