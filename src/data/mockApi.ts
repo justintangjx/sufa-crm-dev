@@ -59,14 +59,17 @@ import type {
   SignInResult,
   TryoutBriefingInput,
 } from "./types";
+import { briefingFieldsFromInput } from "./payloads/briefing";
+import { displayName } from "./payloads/display";
+import {
+  coachMatrixFieldsFromInput,
+  matrixSubmittedAt,
+  playerMatrixFieldsFromInput,
+} from "./payloads/matrix";
 import { generateId, getCurrentUserId, getData, saveData, setCurrentUserId } from "./store";
 
 function now(): string {
   return new Date().toISOString();
-}
-
-function displayName(a: Pick<Athlete, "preferred_name" | "legal_name">): string {
-  return a.preferred_name || a.legal_name || "Unknown athlete";
 }
 
 function findAthlete(athleteId: string): Athlete | undefined {
@@ -137,17 +140,7 @@ function briefingPayload(
   const timestamp = now();
   return {
     id: existing?.id ?? generateId("tb"),
-    campaign_id: input.campaignId,
-    head_coach: input.headCoach ?? null,
-    selectors: input.selectors ?? null,
-    welfare_committee: input.welfareCommittee ?? null,
-    liaison: input.liaison ?? null,
-    training_schedule: input.trainingSchedule ?? null,
-    camps_schedule: input.campsSchedule ?? null,
-    competitions_schedule: input.competitionsSchedule ?? null,
-    time_commitment: input.timeCommitment ?? null,
-    published: input.published,
-    updated_by: updatedBy,
+    ...briefingFieldsFromInput(input, updatedBy),
     created_at: existing?.created_at ?? timestamp,
     updated_at: timestamp,
   };
@@ -211,21 +204,8 @@ function playerMatrixPayload(
   const timestamp = now();
   return {
     id: existing?.id ?? generateId("pms"),
-    campaign_id: input.campaignId,
-    athlete_id: input.athleteId,
-    submitted_by: input.submittedBy,
-    skill_score: input.skillScore ?? null,
-    growth_score: input.growthScore ?? null,
-    readiness_score: input.readinessScore ?? null,
-    confidence_score: input.confidenceScore ?? null,
-    strengths: input.strengths ?? null,
-    development_focus: input.developmentFocus ?? null,
-    support_needed: input.supportNeeded ?? null,
-    status: input.status,
-    submitted_at:
-      input.status === "submitted"
-        ? (existing?.submitted_at ?? timestamp)
-        : (existing?.submitted_at ?? null),
+    ...playerMatrixFieldsFromInput(input),
+    submitted_at: matrixSubmittedAt(input.status, existing?.submitted_at, timestamp),
     created_at: existing?.created_at ?? timestamp,
     updated_at: timestamp,
   };
@@ -238,21 +218,8 @@ function coachMatrixPayload(
   const timestamp = now();
   return {
     id: existing?.id ?? generateId("cma"),
-    campaign_id: input.campaignId,
-    athlete_id: input.athleteId,
-    coach_profile_id: input.coachProfileId,
-    skill_score: input.skillScore ?? null,
-    growth_score: input.growthScore ?? null,
-    readiness_score: input.readinessScore ?? null,
-    tactical_score: input.tacticalScore ?? null,
-    strengths: input.strengths ?? null,
-    development_focus: input.developmentFocus ?? null,
-    coach_notes: input.coachNotes ?? null,
-    status: input.status,
-    submitted_at:
-      input.status === "submitted"
-        ? (existing?.submitted_at ?? timestamp)
-        : (existing?.submitted_at ?? null),
+    ...coachMatrixFieldsFromInput(input),
+    submitted_at: matrixSubmittedAt(input.status, existing?.submitted_at, timestamp),
     created_at: existing?.created_at ?? timestamp,
     updated_at: timestamp,
   };

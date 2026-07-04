@@ -1,73 +1,53 @@
 # Agent instructions (SUFA CRM)
 
-These are persistent instructions for any AI coding agent (Codex/Void/etc.) working in
-this repository. Read them before writing code.
+Read before coding. Full doc index: [`docs/README.md`](docs/README.md).
 
-## Before coding
+## Tier 0 — read every session
 
-1. **Read the product/build spec** in [`prd.md`](prd.md) for SUFA CRM (the canonical
-   requirements: roles, routes, database schema, RLS, assistant behaviour). Do not invent
-   requirements.
-2. Read [`docs/context.md`](docs/context.md) for the current implementation map,
-   deployment state, demo flows, and next build queue.
-3. Read [`docs/campaign-architecture.md`](docs/campaign-architecture.md) for the current
-   U24 Worlds campaign-management architecture, data flow, and decision log.
-4. Read [`docs/cleanup-refactor-plan.md`](docs/cleanup-refactor-plan.md) before structural
-   refactors or large feature additions.
-5. Read [`docs/tooling.md`](docs/tooling.md) to know the commands and conventions.
-6. For multi-agent work, read
-   [`docs/agent-orchestration.md`](docs/agent-orchestration.md).
+1. [`docs/state.md`](docs/state.md) — current implementation, gaps, deployment, next queue
+2. [`docs/codemap.md`](docs/codemap.md) — layers, ownership, feature flags
+
+## Tier 1 — read when the task needs it
+
+| Task                       | Read                                                             |
+| -------------------------- | ---------------------------------------------------------------- |
+| Product behaviour / schema | [`prd.md`](prd.md) via [`docs/prd-index.md`](docs/prd-index.md)  |
+| Campaign / matrix / NPS    | [`docs/domains/campaign.md`](docs/domains/campaign.md)           |
+| Structural refactor        | [`docs/cleanup-refactor-plan.md`](docs/cleanup-refactor-plan.md) |
+| Coach LLM                  | [`docs/coach-llm.md`](docs/coach-llm.md)                         |
+| Commands                   | [`docs/tooling.md`](docs/tooling.md)                             |
+| Multi-agent work           | [`docs/agent-orchestration.md`](docs/agent-orchestration.md)     |
+
+Do not read `prd.md` cover-to-cover for small fixes. Do not read future-plan docs unless implementing that feature.
 
 ## Core principles (do not violate)
 
-- **The database is the source of truth, not the assistant.** The assistant only helps
-  users understand what is missing, drafts reminders, and structures notes for human
-  confirmation. It never auto-sends or auto-saves sensitive data.
-- **CRM first, agent second.** Build real screens (dashboards, tables, forms, review
-  queues), not a chatbot UI.
-- **Role-based access is a hard boundary.** Players, admins, and coaches see only what
-  their role permits. Coaches never see passport/NRIC/admin-sensitive fields by default.
+- **The database is the source of truth, not the assistant.** Drafts only; never auto-send or auto-save sensitive data.
+- **CRM first, agent second.** Real screens, not a chatbot UI.
+- **Role-based access is a hard boundary.** Coaches never see passport/NRIC/admin-sensitive fields by default.
 - **Auditability.** Important profile changes record who/what/when.
-- **Production-safe by default.** If a feature requires extra deployment/setup before it
-  works in production (new migrations, Edge Functions, provider/API keys, webhooks,
-  n8n/Google setup, background jobs, external services, or manual data seeding), ship it
-  behind a feature flag that defaults off in production. The app must keep working, and
-  the default path must not call missing infrastructure.
+- **Production-safe by default.** Unprovisioned infrastructure → feature flag off; safe fallback UI.
 
 ## Working style
 
-- Make **small, focused changes**. Prefer editing existing files over creating new ones.
-- Write **boring, explicit code** over clever abstractions.
-- Match the surrounding code and comment style. Don't add narration comments.
-- **Ask before adding major dependencies.** Use pnpm (`pnpm add` / `pnpm add -D`).
-- New feature flags should be explicit environment variables, documented in
-  `.env.example` when they are client-visible, and named by capability
-  (for example `VITE_ENABLE_COACH_LLM`). Prefer safe fallback UI over broken buttons.
-- If multiple coding agents are active, respect the ownership lanes in
-  [`docs/agent-orchestration.md`](docs/agent-orchestration.md). Do not edit a role-owned
-  file at the same time as another agent without coordination.
-- Keep docs in the loop. Any feature/refactor that changes routes, schema, RLS, feature
-  flags, deployment setup, demo flows, or role boundaries must update `docs/context.md`
-  and, when architectural decisions change, `docs/campaign-architecture.md`.
-- Future final responses for features/refactors must state whether manual Supabase or
-  Cloudflare work is required, even when the answer is "none".
+- Small, focused changes. Match surrounding code. No narration comments.
+- Ask before major dependencies (`pnpm add`).
+- Feature flags: `VITE_*` in `.env.example`, production-default-off, documented in `state.md`.
+- Multi-agent: respect lanes in `docs/codemap.md` / `docs/agent-orchestration.md`.
+- **Doc updates:** change `docs/state.md` when behaviour/deployment/gaps change; append architecture decisions to `docs/domains/campaign.md`; edit `prd.md` only when requirements change.
 
-## Tests and checks are the judge
+## Tests and checks
 
-- **Run tests before declaring success.** At minimum run `pnpm check`
-  (typecheck + lint + format:check + unit tests). Run `pnpm e2e` for flow changes.
-- **Do not weaken assertions** or delete/skip tests to make a suite pass. Fix the code.
-- **Do not disable RLS, auth checks, or role guards** to make tests pass. If a test fails
-  because of a permission boundary, the boundary is usually correct.
-- Run `pnpm format` before finishing; never hand-tune formatting.
-- Keep `pnpm lint:strict` clean (zero warnings) for code you touch.
+```bash
+pnpm check    # minimum before declaring success
+pnpm e2e      # route/auth/cross-role changes
+pnpm format   # before finishing
+```
 
-## Definition of done for a change
+Do not weaken assertions, disable RLS, or skip tests to pass. Keep `pnpm lint:strict` clean on touched code.
 
-1. Types pass (`pnpm typecheck`).
-2. Lint passes with no new warnings (`pnpm lint`).
-3. Code is formatted (`pnpm format`).
-4. Relevant unit/component tests pass and new behaviour is covered.
-5. RLS/role boundaries are intact.
-6. Any feature that depends on unprovisioned production infrastructure has a
-   production-default-off feature flag, documented setup steps, and a verified fallback.
+## Definition of done
+
+1. `pnpm typecheck` 2. `pnpm lint` 3. `pnpm format` 4. Relevant tests pass 5. RLS/role boundaries intact 6. New infra behind flags with fallback
+
+Final responses must state manual **Supabase** and **Cloudflare** work required, or "none".

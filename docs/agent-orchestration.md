@@ -1,8 +1,7 @@
 # Agent Orchestration
 
-This repo can support separate player, admin, and coach coding agents, but do not run
-three agents against the same files without coordination. The current MVP still keeps
-most UI code in `src/App.tsx`, so parallel feature work there will create conflicts.
+This repo can support separate player, admin, and coach coding agents. Role pages live
+under `src/routes/{player,admin,coach}/`; auth and routing are in `src/routes/index.tsx`.
 
 ## Recommended Setup
 
@@ -16,21 +15,18 @@ Use one coordinator plus role-focused agents:
 The coordinator owns cross-cutting code and integration. Role agents own user-facing
 flows inside their lane.
 
-## First Parallelization Task
+## Route split (done)
 
-Before heavy parallel work, have the coordinator split `src/App.tsx` into role-owned
-modules:
+Role-owned modules:
 
 ```txt
-src/App.tsx                    route wiring only
-src/routes/LoginRoutes.tsx      login/callback/root redirect
-src/routes/player/*             player pages/forms
-src/routes/admin/*              admin pages/assistant panels
-src/routes/coach/*              coach pages/evaluation flow
-src/components/*                shared UI primitives only
+src/routes/index.tsx           route wiring, TestApp, App export
+src/routes/auth/*              login, auth callback
+src/routes/player/*            player pages/forms
+src/routes/admin/*             admin pages
+src/routes/coach/*             coach pages
+src/components/shell/*         shared UI primitives
 ```
-
-Until that split happens, only one agent should edit `src/App.tsx` at a time.
 
 ## Agent Lanes
 

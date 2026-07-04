@@ -12,25 +12,91 @@ than one agent may work in parallel.
 
 ## Recommended Order
 
-### 1. Split Route Modules
+### 0. Coordinator Scaffold (Phase 0) — done
 
-Move UI out of `src/App.tsx` while preserving behaviour.
+Extract shared shell, campaign gating, and adapter payload helpers before role route
+splits:
 
-- Keep `src/App.tsx` for providers, route guards, layout, and route wiring.
-- Move player pages to `src/routes/player/`.
-- Move admin pages to `src/routes/admin/`.
-- Move coach pages to `src/routes/coach/`.
-- Move shared form/table/stat components to `src/components/` only when reused.
+- `src/components/shell/*` — layout, guards, form fields, page primitives
+- `src/lib/campaignUi.ts` — U24 detection and campaign ordering
+- `src/lib/campaignCapabilities.ts` — feature-flag + campaign capability gating
+- `src/data/payloads/*` — shared Input → DB field mapping for both API adapters
 
 Acceptance:
 
 - No route behaviour changes.
 - `pnpm check` passes.
-- `pnpm e2e` passes because route structure changes can break navigation.
 
-Manual Supabase/Cloudflare work:
+Manual Supabase/Cloudflare work: none.
 
-- None expected for a pure file split.
+### 1a. Extract auth routes — done
+
+- `src/routes/auth/LoginPage.tsx`, `AuthCallbackPage.tsx`
+- `src/routes/NotFoundPage.tsx`
+- `src/routes/index.tsx` — `AppRoutes`, `TestApp`, default `App` export
+- `src/main.tsx` imports from `src/routes/`
+- Role pages remain in `src/App.tsx` (exported for route wiring)
+
+Acceptance:
+
+- No route behaviour changes.
+- `pnpm check` passes.
+
+Manual Supabase/Cloudflare work: none.
+
+### 1b. Split thin admin pages — done
+
+- `src/routes/admin/AdminPlayersPage.tsx`
+- `src/routes/admin/AdminExportsPage.tsx`
+
+Acceptance:
+
+- No route behaviour changes.
+- `pnpm check` passes.
+
+Manual Supabase/Cloudflare work: none.
+
+### 1c. Split player routes — done
+
+- `src/routes/player/PlayerDashboard.tsx`, `PlayerProfilePage.tsx`, `PlayerCampaignPage.tsx`
+- Form mappers: `playerProfileForm.ts`, `playerMatrixForm.ts`
+- Growth matrix panels: `PlayerCampaignPanels.tsx`
+- Shared form helpers: `src/lib/form.ts` (`optionalText`, `ratingValue`)
+
+Acceptance:
+
+- No route behaviour changes.
+- `pnpm check` passes.
+
+Manual Supabase/Cloudflare work: none.
+
+### 1d. Split remaining admin pages — done
+
+- `src/routes/admin/AdminDashboard.tsx`
+- `src/routes/admin/AdminCampaignsPage.tsx`, `AdminCampaignDetailPage.tsx`
+- `src/routes/admin/AdminReviewPage.tsx`
+- Helpers: `adminCampaignForm.ts`, `adminCampaignAssistant.ts`, `adminReviewHelpers.ts`, `AdminCampaignPanels.tsx`
+
+Acceptance:
+
+- No route behaviour changes.
+- `pnpm check` passes.
+
+Manual Supabase/Cloudflare work: none.
+
+### 1e. Split coach pages — done
+
+- `src/routes/coach/CoachDashboard.tsx`
+- `src/routes/coach/CoachCampaignPage.tsx`, `CoachEvaluationPage.tsx`
+- Helpers: `coachMatrixForm.ts`, `coachGrowthMatrixForm.ts`, `coachEvaluationForm.ts`, `CoachEvaluationPanels.tsx`
+- `src/App.tsx` removed; all role pages live under `src/routes/`
+
+Acceptance:
+
+- No route behaviour changes.
+- `pnpm check` passes.
+
+Manual Supabase/Cloudflare work: none.
 
 ### 2. Add U24 Roster Import
 
@@ -137,8 +203,8 @@ Every future feature/refactor must update docs in the same change when it affect
 - Manual Supabase or Cloudflare steps
 - Architecture decisions or tradeoffs
 
-At minimum update `docs/context.md`. For architectural decisions, update
-`docs/campaign-architecture.md`. For structural cleanup progress, update this file.
+At minimum update `docs/state.md`. For architectural decisions, update
+`docs/domains/campaign.md`. For structural cleanup progress, update this file.
 
 ## Final Response Rule
 

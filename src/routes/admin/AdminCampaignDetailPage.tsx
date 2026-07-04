@@ -1,0 +1,431 @@
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useParams } from "react-router-dom";
+import { useAuth } from "../../auth/AuthContext";
+import { Badge, PageHead } from "../../components/shell/PagePrimitives";
+import { api } from "../../data";
+import type {
+  CampaignMatrixStatusRow,
+  CampaignReadinessEntry,
+  GrowthReviewWithDetails,
+  NpsCoachReportRow,
+} from "../../data/types";
+import { draftPlayerReminder, summarizeCampaignReadiness } from "../../lib/assistant";
+import { campaignCapabilities } from "../../lib/campaignCapabilities";
+import { enablePlayerGrowthMatrix } from "../../lib/env";
+import { passportStatusLabel } from "../../lib/passport";
+import type {
+  Athlete,
+  AssistantDraft,
+  Campaign,
+  CampaignTryoutBriefing,
+  EvaluationAuditEvent,
+} from "../../types/database";
+import {
+  buildIncompletePlayersAnswer,
+  buildSportSyncReadinessAnswer,
+} from "./adminCampaignAssistant";
+import { AdminGrowthMatrixPanel, AdminLiveMatrixPanel, AdminNpsPanel } from "./AdminCampaignPanels";
+import { emptyCampaignAssignmentForm, type CampaignAssignmentFormState } from "./adminCampaignForm";
+
+export function AdminCampaignDetailPage() {
+  const { campaignId = "" } = useParams();
+  const { profile } = useAuth();
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [rows, setRows] = useState<CampaignReadinessEntry[]>([]);
+  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [assignment, setAssignment] = useState<CampaignAssignmentFormState>(
+    emptyCampaignAssignmentForm,
+  );
+  const [drafts, setDrafts] = useState<AssistantDraft[]>([]);
+  const [briefing, setBriefing] = useState<CampaignTryoutBriefing | null>(null);
+  const [growthReviews, setGrowthReviews] = useState<GrowthReviewWithDetails[]>([]);
+  const [matrixRows, setMatrixRows] = useState<CampaignMatrixStatusRow[]>([]);
+  const [auditEvents, setAuditEvents] = useState<EvaluationAuditEvent[]>([]);
+  const [npsReport, setNpsReport] = useState<NpsCoachReportRow[]>([]);
+  const [drafting, setDrafting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [assistantResponse, setAssistantResponse] = useState<string | null>(null);
+
+  const loadGrowthMatrixAdmin = useCallback(async () => {
+    if (!enablePlayerGrowthMatrix) {
+      return;
+    }
+    const [nextBriefing, nextGrowthReviews] = await Promise.all([
+      api.getTryoutBriefing(campaignId),
+      api.getCampaignGrowthReviews(campaignId),
+    ]);
+    setBriefing(nextBriefing);
+    setGrowthReviews(nextGrowthReviews);
+  }, [campaignId]);
+
+  const loadCampaignDetail = useCallback(async () => {
+    const [nextCampaign, nextRows, nextAthletes] = await Promise.all([
+      api.getCampaign(campaignId),
+      api.getCampaignReadiness(campaignId),
+      api.listAthletes(),
+    ]);
+    setCampaign(nextCampaign);
+    setRows(nextRows);
+    setAthletes(nextAthletes);
+    if (campaignCapabilities(nextCampaign).liveMatrix) {
+      const [nextMatrixRows, nextAuditEvents] = await Promise.all([
+        api.getCampaignMatrixStatus(campaignId),
+        api.listEvaluationAuditEvents(campaignId),
+      ]);
+      setMatrixRows(nextMatrixRows);
+      setAuditEvents(nextAuditEvents);
+    } else {
+      setMatrixRows([]);
+      setAuditEvents([]);
+    }
+    if (campaignCapabilities(nextCampaign).coachNps) {
+      setNpsReport(await api.getNpsReport(campaignId));
+    } else {
+      setNpsReport([]);
+    }
+    void loadGrowthMatrixAdmin();
+  }, [campaignId, loadGrowthMatrixAdmin]);
+
+  useEffect(() => {
+    void loadCampaignDetail();
+  }, [loadCampaignDetail]);
+
+  useEffect(() => {
+    if (!profile) {
+      return;
+    }
+    void api.listAssistantDrafts(profile.id).then((nextDrafts) => {
+      setDrafts(nextDrafts.filter((draft) => draft.campaign_id === campaignId));
+    });
+  }, [campaignId, profile]);
+
+  const incompleteRows = rows.filter((row) => row.missingFields.length > 0);
+  const passportAttention = rows.filter(
+    (row) => row.passportStatus === "expired" || row.passportStatus === "expiring_soon",
+  );
+  const pendingEvaluations = rows.filter((row) => row.evaluationStatus !== "submitted");
+  const assignedAthleteIds = new Set(rows.map((row) => row.athleteId));
+  const unassignedAthletes = athletes.filter((athlete) => !assignedAthleteIds.has(athlete.id));
+  const detailCaps = campaignCapabilities(campaign);
+
+  useEffect(() => {
+    if (assignment.athleteId || unassignedAthletes.length === 0) {
+      return;
+    }
+    setAssignment((current) => ({ ...current, athleteId: unassignedAthletes[0]?.id ?? "" }));
+  }, [assignment.athleteId, unassignedAthletes]);
+
+  function handleWhoIsIncomplete() {
+    setAssistantResponse(buildIncompletePlayersAnswer(rows));
+  }
+
+  function handleSportSyncReadiness() {
+    setAssistantResponse(buildSportSyncReadinessAnswer(rows));
+  }
+
+  async function createReminderDraft(row: CampaignReadinessEntry): Promise<AssistantDraft | null> {
+    if (!profile) {
+      return null;
+    }
+    const content = draftPlayerReminder({
+      playerName: row.name,
+      missingFields: row.missingFields,
+      campaignName: campaign?.name,
+    });
+    return api.createAssistantDraft({
+      createdBy: profile.id,
+      draftType: "player_reminder",
+      campaignId,
+      content,
+    });
+  }
+
+  async function handleDraftReminder(row: CampaignReadinessEntry) {
+    if (row.missingFields.length === 0) {
+      return;
+    }
+    setDrafting(true);
+    setMessage(null);
+    const draft = await createReminderDraft(row);
+    if (draft) {
+      setDrafts((current) => [draft, ...current]);
+      setMessage("Reminder draft created for review. Nothing has been sent.");
+      setAssistantResponse(
+        `I drafted a reminder for ${row.name}. It is saved for admin review and has not been sent.`,
+      );
+    }
+    setDrafting(false);
+  }
+
+  async function handleDraftAllReminders() {
+    setDrafting(true);
+    setMessage(null);
+    const created = await Promise.all(incompleteRows.map((row) => createReminderDraft(row)));
+    const validDrafts = created.filter((draft): draft is AssistantDraft => draft !== null);
+    setDrafts((current) => [...validDrafts, ...current]);
+    setMessage(
+      validDrafts.length > 0
+        ? `${validDrafts.length} reminder ${
+            validDrafts.length === 1 ? "draft" : "drafts"
+          } created for review. Nothing has been sent.`
+        : "No incomplete players need reminders right now.",
+    );
+    setAssistantResponse(
+      validDrafts.length > 0
+        ? `I created ${validDrafts.length} reminder ${
+            validDrafts.length === 1 ? "draft" : "drafts"
+          } from the campaign readiness data. Nothing has been sent.`
+        : "No incomplete players need reminders right now.",
+    );
+    setDrafting(false);
+  }
+
+  async function handleShareGrowthReview(reviewId: string) {
+    if (!profile) {
+      return;
+    }
+    await api.shareGrowthReview(reviewId, profile.id);
+    setMessage("Growth review shared with the athlete and ready for welfare-board reporting.");
+    await loadGrowthMatrixAdmin();
+  }
+
+  async function handleAssignPlayer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!assignment.athleteId) {
+      setMessage("Select a player before assigning.");
+      return;
+    }
+    await api.assignCampaignMember({
+      campaignId,
+      athleteId: assignment.athleteId,
+      status: assignment.status,
+    });
+    const assigned = athletes.find((athlete) => athlete.id === assignment.athleteId);
+    setMessage(
+      `${assigned?.preferred_name || assigned?.legal_name || "Player"} assigned to ${campaign?.name ?? "campaign"}.`,
+    );
+    setAssignment(emptyCampaignAssignmentForm);
+    await loadCampaignDetail();
+  }
+
+  async function handleSaveNpsSurvey(
+    window: "mid_season" | "post_season",
+    status: "open" | "closed",
+  ) {
+    if (!profile || !campaign) {
+      return;
+    }
+    await api.saveNpsSurvey({
+      campaignId,
+      title: `${campaign.name} ${window === "mid_season" ? "mid-season" : "post-season"} coach NPS`,
+      window,
+      status,
+      opensAt: status === "open" ? new Date().toISOString() : null,
+      closesAt: status === "closed" ? new Date().toISOString() : null,
+      minResponseCount: 3,
+      createdBy: profile.id,
+    });
+    setMessage(`NPS survey ${status === "open" ? "opened" : "closed"}.`);
+    setNpsReport(await api.getNpsReport(campaignId));
+  }
+
+  return (
+    <>
+      <PageHead
+        title={campaign?.name ?? "Campaign"}
+        eyebrow="Campaign readiness"
+        subtitle={
+          campaign
+            ? `${campaign.team ?? "Team"} - ${campaign.location ?? "Location TBC"}`
+            : "Campaign readiness"
+        }
+      />
+      <section className="card stack summary-card">
+        <div className="section-title">
+          <h2>Readiness summary</h2>
+          <Badge tone={incompleteRows.length === 0 ? "ok" : "warn"}>
+            {rows.length - incompleteRows.length}/{rows.length || 0} ready
+          </Badge>
+        </div>
+        <p>{summarizeCampaignReadiness(rows)}</p>
+        <div className="grid cols-4">
+          <div className="stat">
+            <div className="stat-value">{rows.length}</div>
+            <div className="stat-label">Players</div>
+          </div>
+          <div className="stat">
+            <div className="stat-value">{incompleteRows.length}</div>
+            <div className="stat-label">Need profile info</div>
+          </div>
+          <div className="stat">
+            <div className="stat-value">{passportAttention.length}</div>
+            <div className="stat-label">Passport attention</div>
+          </div>
+          <div className="stat">
+            <div className="stat-value">{pendingEvaluations.length}</div>
+            <div className="stat-label">Evaluations pending</div>
+          </div>
+        </div>
+        {message ? <p className="alert ok">{message}</p> : null}
+      </section>
+      <section className="card stack">
+        <div className="section-title">
+          <h2>Assign players</h2>
+          <Badge>{unassignedAthletes.length} available</Badge>
+        </div>
+        {unassignedAthletes.length > 0 ? (
+          <form
+            className="grid cols-3 assignment-form"
+            onSubmit={(event) => void handleAssignPlayer(event)}
+          >
+            <div className="field">
+              <label htmlFor="assign-player">Player</label>
+              <select
+                id="assign-player"
+                value={assignment.athleteId}
+                onChange={(event) =>
+                  setAssignment((current) => ({ ...current, athleteId: event.target.value }))
+                }
+              >
+                {unassignedAthletes.map((athlete) => (
+                  <option key={athlete.id} value={athlete.id}>
+                    {athlete.preferred_name || athlete.legal_name || "Unnamed player"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="assign-status">Assignment status</label>
+              <select
+                id="assign-status"
+                value={assignment.status}
+                onChange={(event) =>
+                  setAssignment((current) => ({
+                    ...current,
+                    status: event.target.value as CampaignAssignmentFormState["status"],
+                  }))
+                }
+              >
+                <option value="invited">Invited</option>
+                <option value="registered">Registered</option>
+                <option value="selected">Selected</option>
+                <option value="reserve">Reserve</option>
+                <option value="withdrawn">Withdrawn</option>
+              </select>
+            </div>
+            <div className="field field-action">
+              <label aria-hidden="true">&nbsp;</label>
+              <button type="submit" className="btn primary">
+                Assign player
+              </button>
+            </div>
+          </form>
+        ) : (
+          <p className="muted">All athletes are already assigned to this campaign.</p>
+        )}
+        <p className="muted">
+          Assigned players can see the campaign from their player dashboard. Coach evaluations and
+          Growth Matrix drafts remain hidden until the correct review/share steps happen.
+        </p>
+      </section>
+      {detailCaps.growthMatrix ? (
+        <AdminGrowthMatrixPanel
+          briefing={briefing}
+          reviews={growthReviews}
+          onShare={(reviewId) => void handleShareGrowthReview(reviewId)}
+        />
+      ) : null}
+      {detailCaps.liveMatrix ? (
+        <AdminLiveMatrixPanel rows={matrixRows} auditEvents={auditEvents} />
+      ) : null}
+      {detailCaps.coachNps ? (
+        <AdminNpsPanel
+          report={npsReport}
+          onOpenMid={() => void handleSaveNpsSurvey("mid_season", "open")}
+          onOpenPost={() => void handleSaveNpsSurvey("post_season", "open")}
+          onCloseMid={() => void handleSaveNpsSurvey("mid_season", "closed")}
+          onClosePost={() => void handleSaveNpsSurvey("post_season", "closed")}
+        />
+      ) : null}
+      <section className="card stack assistant-card">
+        <div className="section-title">
+          <h2>Assistant</h2>
+          <Badge>guided</Badge>
+        </div>
+        <div className="btn-row">
+          <button type="button" className="btn" onClick={handleWhoIsIncomplete}>
+            Who is incomplete?
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={() => void handleDraftAllReminders()}
+            disabled={drafting || incompleteRows.length === 0}
+          >
+            {drafting ? "Drafting..." : `Draft reminders (${incompleteRows.length})`}
+          </button>
+          <button type="button" className="btn" onClick={handleSportSyncReadiness}>
+            Are we SportSync-ready?
+          </button>
+        </div>
+        {assistantResponse ? <pre className="note-box">{assistantResponse}</pre> : null}
+        <p className="muted">Assistant answers use CRM data already visible to this admin.</p>
+      </section>
+      <section className="card table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Missing</th>
+              <th>Passport</th>
+              <th>Profile</th>
+              <th>Evaluation</th>
+              <th>Draft</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.athleteId}>
+                <td>{row.name}</td>
+                <td>
+                  {row.missingFields.length > 0
+                    ? row.missingFields.map((field) => field.label).join(", ")
+                    : "Complete"}
+                </td>
+                <td>{passportStatusLabel(row.passportStatus)}</td>
+                <td>{row.profileStatus}</td>
+                <td>{row.evaluationStatus ?? "pending"}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={() => void handleDraftReminder(row)}
+                    disabled={drafting || row.missingFields.length === 0}
+                  >
+                    Draft reminder
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+      {drafts.length > 0 ? (
+        <section className="card stack">
+          <div className="section-title">
+            <h2>Reminder draft preview</h2>
+            <Badge>{drafts.length} draft</Badge>
+          </div>
+          <p className="muted">
+            These drafts are not sent. Admins can review, copy, edit, or discard them.
+          </p>
+          {drafts.map((draft) => (
+            <pre className="note-box" key={draft.id}>
+              {draft.content}
+            </pre>
+          ))}
+        </section>
+      ) : null}
+    </>
+  );
+}

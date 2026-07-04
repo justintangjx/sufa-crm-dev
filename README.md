@@ -23,8 +23,8 @@ pnpm dev
 ```
 
 Without Supabase env vars, the app uses an in-memory mock backend. Demo logins such as
-`coach@sufa.test` work there. See `docs/context.md` for mock vs Supabase vs hybrid demo
-LLM modes.
+`coach@sufa.test` work there. See `docs/state.md` for mock vs Supabase vs hybrid demo LLM
+modes.
 
 **Checks before you push:**
 
@@ -37,17 +37,18 @@ Command details: `docs/tooling.md`.
 
 ## Documentation map
 
-| If you are…                          | Read                                                     |
-| ------------------------------------ | -------------------------------------------------------- |
-| Changing product behaviour           | `prd.md`                                                 |
-| Coding in this repo (human or agent) | `AGENTS.md`, then `docs/context.md`                      |
-| U24 campaign architecture/decisions  | `docs/campaign-architecture.md`                          |
-| Future cleanup/refactor planning     | `docs/cleanup-refactor-plan.md`                          |
-| Coach LLM / evals                    | `docs/coach-llm.md`                                      |
-| Deploying Cloudflare + Supabase      | `docs/context.md` (Deployment, Demo coach with live LLM) |
-| Google Sheets export (planned)       | `docs/google-sheets-snapshots.md`                        |
+| If you are…                          | Read                                              |
+| ------------------------------------ | ------------------------------------------------- |
+| Coding in this repo (human or agent) | `AGENTS.md` → `docs/state.md` → `docs/codemap.md` |
+| Task-specific depth                  | `docs/README.md` (index)                          |
+| Changing product behaviour           | `prd.md` via `docs/prd-index.md`                  |
+| U24 campaign architecture/decisions  | `docs/domains/campaign.md`                        |
+| Future cleanup/refactor planning     | `docs/cleanup-refactor-plan.md`                   |
+| Coach LLM / evals                    | `docs/coach-llm.md`                               |
+| Deploying Cloudflare + Supabase      | `docs/state.md` + `docs/domains/campaign.md`      |
+| Google Sheets export (planned)       | `docs/google-sheets-snapshots.md`                 |
 
-Agents should follow `AGENTS.md` first. This README is for humans browsing the repo.
+Agents: start with `AGENTS.md`. Humans: this README is the overview.
 
 ## Stack
 

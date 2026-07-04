@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { api, resetData } from "./data";
-import { TestApp } from "./App";
+import { TestApp } from "./routes";
 
 async function submitNpsFor(profileId: string, score: number) {
   const athlete = await api.getAthleteForProfile(profileId);

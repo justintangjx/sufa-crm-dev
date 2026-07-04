@@ -65,6 +65,13 @@ import type {
 import type { CoachNoteActionRequest, CoachNoteGenerationRequest } from "../lib/coachNotes";
 import { executeDeterministicCoachNoteAction } from "./coachNoteExecutor";
 import { createSupabaseCoachNotePersistence } from "./coachNoteSupabasePersistence";
+import { briefingFieldsFromInput } from "./payloads/briefing";
+import { displayName, profileDisplayName } from "./payloads/display";
+import {
+  coachMatrixFieldsFromInput,
+  matrixSubmittedAtForUpsert,
+  playerMatrixFieldsFromInput,
+} from "./payloads/matrix";
 
 function client() {
   if (!supabase) {
@@ -80,10 +87,6 @@ async function currentAthlete(profileId: string): Promise<Athlete | null> {
     .eq("profile_id", profileId)
     .maybeSingle();
   return (data as Athlete | null) ?? null;
-}
-
-function displayName(a: Pick<Athlete, "preferred_name" | "legal_name">): string {
-  return a.preferred_name || a.legal_name || "Unknown athlete";
 }
 
 async function growthReviewDetails(
@@ -127,57 +130,17 @@ async function growthReviewDetails(
   }));
 }
 
-function briefingPayload(input: TryoutBriefingInput, updatedBy: string) {
-  return {
-    campaign_id: input.campaignId,
-    head_coach: input.headCoach ?? null,
-    selectors: input.selectors ?? null,
-    welfare_committee: input.welfareCommittee ?? null,
-    liaison: input.liaison ?? null,
-    training_schedule: input.trainingSchedule ?? null,
-    camps_schedule: input.campsSchedule ?? null,
-    competitions_schedule: input.competitionsSchedule ?? null,
-    time_commitment: input.timeCommitment ?? null,
-    published: input.published,
-    updated_by: updatedBy,
-  };
-}
-
-function profileDisplayName(profile: Pick<Profile, "email" | "full_name" | "preferred_name">) {
-  return profile.preferred_name || profile.full_name || profile.email;
-}
-
 function playerMatrixPayload(input: PlayerMatrixInput) {
   return {
-    campaign_id: input.campaignId,
-    athlete_id: input.athleteId,
-    submitted_by: input.submittedBy,
-    skill_score: input.skillScore ?? null,
-    growth_score: input.growthScore ?? null,
-    readiness_score: input.readinessScore ?? null,
-    confidence_score: input.confidenceScore ?? null,
-    strengths: input.strengths ?? null,
-    development_focus: input.developmentFocus ?? null,
-    support_needed: input.supportNeeded ?? null,
-    status: input.status,
-    submitted_at: input.status === "submitted" ? new Date().toISOString() : null,
+    ...playerMatrixFieldsFromInput(input),
+    submitted_at: matrixSubmittedAtForUpsert(input.status),
   };
 }
 
 function coachMatrixPayload(input: CoachMatrixInput) {
   return {
-    campaign_id: input.campaignId,
-    athlete_id: input.athleteId,
-    coach_profile_id: input.coachProfileId,
-    skill_score: input.skillScore ?? null,
-    growth_score: input.growthScore ?? null,
-    readiness_score: input.readinessScore ?? null,
-    tactical_score: input.tacticalScore ?? null,
-    strengths: input.strengths ?? null,
-    development_focus: input.developmentFocus ?? null,
-    coach_notes: input.coachNotes ?? null,
-    status: input.status,
-    submitted_at: input.status === "submitted" ? new Date().toISOString() : null,
+    ...coachMatrixFieldsFromInput(input),
+    submitted_at: matrixSubmittedAtForUpsert(input.status),
   };
 }
 
@@ -832,7 +795,7 @@ export const supabaseApi: Api = {
   async saveTryoutBriefing(input: TryoutBriefingInput, updatedBy: string) {
     const { data, error } = await client()
       .from("campaign_tryout_briefings")
-      .upsert(briefingPayload(input, updatedBy), { onConflict: "campaign_id" })
+      .upsert(briefingFieldsFromInput(input, updatedBy), { onConflict: "campaign_id" })
       .select("*")
       .single();
     if (error) {
