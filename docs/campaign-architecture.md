@@ -6,8 +6,10 @@ deployment behaviour.
 
 ## Current Architecture
 
-The app remains a role-based CRM, but the primary operating surface is now an active
-campaign, currently seeded as `U24 Worlds 2026` (`c-u24`) in mock mode.
+The app remains a role-based CRM, but the MVP operating surface is now the active
+`U24 Worlds 2026` campaign (`c-u24`) in mock mode. `SEA Games 2026` is a separate
+competition/campaign kept only as legacy/sample data for existing Growth Matrix coverage;
+it must not be treated as part of the U24 Worlds campaign.
 
 - `campaigns` defines the training-to-competition container.
 - `athletes` remains the reusable player profile record.
@@ -72,8 +74,21 @@ profile foundation.
 Reason: The user needs the tool to manage a training-to-competition campaign, not only
 general athlete readiness.
 
-Consequence: Dashboards now prefer the active U24 campaign. Existing SEA Games and Growth
-Matrix demo flows remain for compatibility.
+Consequence: Dashboards and campaign lists now prefer the active U24 campaign. Existing
+SEA Games and Growth Matrix demo flows remain for compatibility, but U24-only matrix and
+NPS features are scoped to U24 campaign rows.
+
+### 2026-07-04: Separate SEA Games From U24 MVP
+
+Decision: Treat SEA Games 2026 and U24 Worlds 2026 as two distinct campaigns, with U24
+Worlds as the MVP focus.
+
+Reason: The product direction is U24 Worlds campaign management. SEA Games sample data is
+useful for legacy CRM/Growth Matrix tests, but showing it as the U24 operating surface
+confuses users and future agents.
+
+Consequence: U24 appears first in demo campaign lists; U24 live matrix and coach NPS tools
+must not render on SEA Games routes.
 
 ### 2026-07-04: Single Live Matrix
 

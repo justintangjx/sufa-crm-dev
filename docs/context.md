@@ -43,6 +43,8 @@ Implemented:
   assistant.
 - U24 Worlds campaign-management pivot:
   - active mock campaign `c-u24` / `U24 Worlds 2026`
+  - U24 Worlds is the MVP focus; SEA Games 2026 is separate legacy/sample campaign data,
+    not part of the U24 Worlds campaign
   - live player self-evaluation matrix
   - coach matrix assessment with audit events
   - admin matrix status and audit panel
@@ -125,6 +127,9 @@ Player Growth Matrix demo:
 U24 Worlds campaign demo:
 
 - In mock mode, admin/coach/player dashboards prefer `U24 Worlds 2026` (`c-u24`).
+- Campaign lists should order U24 Worlds first when U24 and SEA Games are both present.
+- SEA Games 2026 remains a separate campaign for compatibility with older Growth Matrix
+  demo flows and should not be relabelled as U24.
 - Mock U24 selected players are Alice, Ben, and Cara through `campaign_members`.
 - Alice has a submitted player matrix and one submitted coach assessment.
 - The mid-season coach NPS survey is open and aggregate reporting is withheld until at

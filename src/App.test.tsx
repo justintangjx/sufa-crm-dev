@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { api, resetData } from "./data";
@@ -45,6 +45,23 @@ describe("App routing", () => {
       await screen.findByRole("heading", { name: /player campaign hub/i }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /admin dashboard/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps U24 Worlds first while SEA Games remains a separate campaign", async () => {
+    await api.signIn("alice@sufa.test");
+
+    render(<TestApp initialEntries={["/player"]} />);
+
+    const campaignPanel = (
+      await screen.findByRole("heading", { name: /campaign readiness/i })
+    ).closest("section");
+    expect(campaignPanel).not.toBeNull();
+
+    const campaignLinks = within(campaignPanel as HTMLElement).getAllByRole("link");
+    expect(campaignLinks.map((link) => link.textContent)).toEqual([
+      "U24 Worlds 2026",
+      "SEA Games 2026",
+    ]);
   });
 
   it("lets a player complete missing profile details and records audit requests", async () => {
@@ -109,6 +126,10 @@ describe("App routing", () => {
 
     expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /before tryouts/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /live self-evaluation matrix/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /coach nps/i })).not.toBeInTheDocument();
     expect(screen.getAllByText(/Coach Lim/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Core minutes/i)).toBeInTheDocument();
     expect(screen.getByText(/reliable throwing under pressure/i)).toBeInTheDocument();
@@ -171,6 +192,10 @@ describe("App routing", () => {
     render(<TestApp initialEntries={["/admin/campaigns/c-sea"]} />);
 
     expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /u24 live evaluation matrix/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^coach nps$/i })).not.toBeInTheDocument();
     expect((await screen.findAllByText(/passport expiry/i)).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /who is incomplete/i }));
@@ -389,6 +414,21 @@ describe("App routing", () => {
     expect(evaluation?.status).toBe("submitted");
     expect(evaluation?.recommendation).toBe("selected");
     expect(evaluation?.strengths).toContain("Strong hucks");
+  });
+
+  it("keeps U24 live matrix tools off a coach SEA Games campaign route", async () => {
+    await api.signIn("coach@sufa.test");
+
+    render(<TestApp initialEntries={["/coach/campaigns/c-sea"]} />);
+
+    expect(
+      await screen.findByRole("heading", { name: /sea games 2026 players/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /u24 coach matrix assessment/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /player matrix/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /growth matrix/i })).toBeInTheDocument();
   });
 
   it("does not require an LLM call to structure coach notes in the app shell", async () => {

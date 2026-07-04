@@ -211,21 +211,43 @@ const roleNav: Record<Role, { to: string; label: string }[]> = {
     { to: "/admin/review", label: "Review" },
     { to: "/admin/exports", label: "Exports" },
   ],
-  coach: [
-    { to: "/coach", label: "Dashboard" },
-    { to: "/coach/campaigns/c-u24", label: "U24 Worlds" },
-  ],
+  coach: [{ to: "/coach", label: "Dashboard" }],
 };
+
+function isU24Campaign(
+  campaign: Pick<Campaign, "id" | "name" | "team"> | null | undefined,
+): boolean {
+  if (!campaign) {
+    return false;
+  }
+  const campaignName = campaign.name.toLowerCase();
+  const campaignTeam = campaign.team?.toLowerCase() ?? "";
+  return campaign.id === "c-u24" || campaignName.includes("u24") || campaignTeam.includes("u24");
+}
 
 function pickPrimaryCampaign(campaigns: readonly Campaign[]): Campaign | null {
   return (
-    campaigns.find(
-      (campaign) => campaign.status === "active" && campaign.name.toLowerCase().includes("u24"),
-    ) ??
+    campaigns.find((campaign) => campaign.status === "active" && isU24Campaign(campaign)) ??
     campaigns.find((campaign) => campaign.status === "active") ??
     campaigns[0] ??
     null
   );
+}
+
+function orderCampaignsForMvp<
+  T extends Pick<Campaign, "id" | "name" | "team" | "status" | "start_date">,
+>(campaigns: readonly T[]): T[] {
+  return campaigns.toSorted((a, b) => {
+    const u24Rank = Number(isU24Campaign(b)) - Number(isU24Campaign(a));
+    if (u24Rank !== 0) {
+      return u24Rank;
+    }
+    const activeRank = Number(b.status === "active") - Number(a.status === "active");
+    if (activeRank !== 0) {
+      return activeRank;
+    }
+    return (b.start_date ?? "").localeCompare(a.start_date ?? "");
+  });
 }
 
 function DemoCoachLlmConfigBanner() {
@@ -330,14 +352,14 @@ function LoginPage() {
           <p className="auth-wordmark">SUFA CRM</p>
           <h1>Every roster, tournament-ready.</h1>
           <p className="auth-sub">
-            Player profiles, travel documents, and coach evaluations for Singapore Ultimate
-            campaigns - from SEA Games to Worlds.
+            U24 Worlds campaign operations for Singapore Ultimate, with reusable CRM records for
+            future competitions.
           </p>
           <div className="auth-visual" aria-hidden="true">
             <img src={heroImage} alt="" />
             <div className="auth-visual-panel top">
-              <span>SEA Games 2026</span>
-              <strong>2/3 profile-ready</strong>
+              <span>U24 Worlds 2026</span>
+              <strong>Live matrix open</strong>
             </div>
             <div className="auth-visual-panel bottom">
               <span>Coach notes</span>
@@ -459,6 +481,7 @@ function PlayerDashboard() {
   const missing = useMemo(() => (athlete ? getMissingAthleteFields(athlete) : []), [athlete]);
   const completion = athlete ? getProfileCompletion(athlete) : 0;
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === "active");
+  const orderedCampaigns = orderCampaignsForMvp(campaigns);
   const submittedReviewCount = athlete?.profile_status === "submitted" ? 1 : 0;
   const blockerCount = missing.length;
 
@@ -467,7 +490,7 @@ function PlayerDashboard() {
       <>
         <PageHead
           title="Player Campaign Hub"
-          subtitle="Your U24 Worlds profile, live self-evaluation, and coach NPS tasks."
+          subtitle="Your campaign profile, evaluations, and survey tasks."
           eyebrow="Player workspace"
         />
         <section className="card">
@@ -481,7 +504,7 @@ function PlayerDashboard() {
     <>
       <PageHead
         title="Player Campaign Hub"
-        subtitle="Your U24 Worlds profile, live self-evaluation, and coach NPS tasks."
+        subtitle="Your campaign profile, evaluations, and survey tasks."
         eyebrow="Player workspace"
         actions={
           <Link className="btn primary" to="/player/profile">
@@ -569,9 +592,9 @@ function PlayerDashboard() {
             <h2>Campaign readiness</h2>
             <Badge>{campaigns.length} assigned</Badge>
           </div>
-          {campaigns.length > 0 ? (
+          {orderedCampaigns.length > 0 ? (
             <div className="campaign-strip">
-              {campaigns.map((campaign) => (
+              {orderedCampaigns.map((campaign) => (
                 <div className="campaign-strip-item" key={campaign.id}>
                   <div>
                     <strong>
@@ -975,18 +998,25 @@ function PlayerCampaignPage() {
       return;
     }
     setLoading(true);
-    const [nextFlow, nextAthlete, nextNpsTasks] = await Promise.all([
+    const [nextFlow, nextAthlete] = await Promise.all([
       api.getPlayerCampaignFlow(profile.id, campaignId),
       api.getAthleteForProfile(profile.id),
-      enableCampaignNps ? api.listPlayerNpsTasks(profile.id, campaignId) : Promise.resolve([]),
     ]);
+    const nextIsU24Campaign = isU24Campaign(nextFlow?.campaign);
+    const nextNpsTasks =
+      enableCampaignNps && nextIsU24Campaign
+        ? await api.listPlayerNpsTasks(profile.id, campaignId)
+        : [];
     setFlow(nextFlow);
     setAthlete(nextAthlete);
     setNpsTasks(nextNpsTasks);
-    if (nextAthlete && enableCampaignEvaluationMatrix) {
+    if (nextAthlete && enableCampaignEvaluationMatrix && nextIsU24Campaign) {
       const nextSubmission = await api.getPlayerMatrixSubmission(campaignId, nextAthlete.id);
       setMatrixSubmission(nextSubmission);
       setMatrixForm(playerMatrixFormFromSubmission(nextSubmission));
+    } else {
+      setMatrixSubmission(null);
+      setMatrixForm(emptyPlayerMatrixForm);
     }
     setLoading(false);
   }, [campaignId, profile]);
@@ -1086,15 +1116,22 @@ function PlayerCampaignPage() {
   }
 
   const latestReview = flow.reviews[0] ?? null;
+  const isU24Flow = isU24Campaign(flow.campaign);
+  const showCampaignMatrix = enableCampaignEvaluationMatrix && isU24Flow;
+  const showCampaignNps = enableCampaignNps && isU24Flow;
 
   return (
     <>
       <PageHead
         title={flow.campaign.name}
-        subtitle="U24 campaign tasks from training start through competition closeout."
+        subtitle={
+          isU24Flow
+            ? "U24 campaign tasks from training start through competition closeout."
+            : "Campaign readiness tasks from training start through competition closeout."
+        }
         eyebrow="Player campaign hub"
       />
-      {enableCampaignEvaluationMatrix ? (
+      {showCampaignMatrix ? (
         <section className="card stack">
           <div className="section-title">
             <h2>Live self-evaluation matrix</h2>
@@ -1156,7 +1193,7 @@ function PlayerCampaignPage() {
           </p>
         </section>
       ) : null}
-      {enableCampaignNps && npsTasks.length > 0 ? (
+      {showCampaignNps && npsTasks.length > 0 ? (
         <section className="card stack">
           <div className="section-title">
             <h2>Coach NPS</h2>
@@ -1420,12 +1457,17 @@ function AdminDashboard() {
   );
   const readyPercent = totalPlayers > 0 ? Math.round((readyRows.length / totalPlayers) * 100) : 0;
   const pendingRequests = pendingReviewRequests(requests);
+  const primaryIsU24 = isU24Campaign(campaign);
 
   return (
     <>
       <PageHead
         title="Admin Dashboard"
-        subtitle="U24 campaign operations from training start through competition closeout."
+        subtitle={
+          primaryIsU24
+            ? "U24 campaign operations from training start through competition closeout."
+            : "Campaign operations from training start through competition closeout."
+        }
         eyebrow="Campaign command center"
         actions={
           <>
@@ -1483,13 +1525,13 @@ function AdminDashboard() {
             <strong>{pendingEvaluationRows.length}</strong>
             <span>Evaluations pending</span>
           </div>
-          {enableCampaignEvaluationMatrix ? (
+          {enableCampaignEvaluationMatrix && primaryIsU24 ? (
             <div>
               <strong>{summary?.playerMatrixSubmittedCount ?? 0}</strong>
               <span>Player matrices submitted</span>
             </div>
           ) : null}
-          {enableCampaignNps ? (
+          {enableCampaignNps && primaryIsU24 ? (
             <div>
               <strong>{summary?.openNpsSurveyCount ?? 0}</strong>
               <span>Open NPS surveys</span>
@@ -1636,7 +1678,7 @@ function AdminCampaignsPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   const loadCampaigns = useCallback(async () => {
-    setCampaigns(await api.listCampaigns());
+    setCampaigns(orderCampaignsForMvp(await api.listCampaigns()));
   }, []);
 
   useEffect(() => {
@@ -1820,16 +1862,21 @@ function AdminCampaignDetailPage() {
     setCampaign(nextCampaign);
     setRows(nextRows);
     setAthletes(nextAthletes);
-    if (enableCampaignEvaluationMatrix) {
+    if (enableCampaignEvaluationMatrix && isU24Campaign(nextCampaign)) {
       const [nextMatrixRows, nextAuditEvents] = await Promise.all([
         api.getCampaignMatrixStatus(campaignId),
         api.listEvaluationAuditEvents(campaignId),
       ]);
       setMatrixRows(nextMatrixRows);
       setAuditEvents(nextAuditEvents);
+    } else {
+      setMatrixRows([]);
+      setAuditEvents([]);
     }
-    if (enableCampaignNps) {
+    if (enableCampaignNps && isU24Campaign(nextCampaign)) {
       setNpsReport(await api.getNpsReport(campaignId));
+    } else {
+      setNpsReport([]);
     }
     void loadGrowthMatrixAdmin();
   }, [campaignId, loadGrowthMatrixAdmin]);
@@ -1854,6 +1901,7 @@ function AdminCampaignDetailPage() {
   const pendingEvaluations = rows.filter((row) => row.evaluationStatus !== "submitted");
   const assignedAthleteIds = new Set(rows.map((row) => row.athleteId));
   const unassignedAthletes = athletes.filter((athlete) => !assignedAthleteIds.has(athlete.id));
+  const isU24Detail = isU24Campaign(campaign);
 
   useEffect(() => {
     if (assignment.athleteId || unassignedAthletes.length === 0) {
@@ -2082,10 +2130,10 @@ function AdminCampaignDetailPage() {
           onShare={(reviewId) => void handleShareGrowthReview(reviewId)}
         />
       ) : null}
-      {enableCampaignEvaluationMatrix ? (
+      {enableCampaignEvaluationMatrix && isU24Detail ? (
         <AdminLiveMatrixPanel rows={matrixRows} auditEvents={auditEvents} />
       ) : null}
-      {enableCampaignNps ? (
+      {enableCampaignNps && isU24Detail ? (
         <AdminNpsPanel
           report={npsReport}
           onOpenMid={() => void handleSaveNpsSurvey("mid_season", "open")}
@@ -2725,7 +2773,7 @@ function CoachDashboard() {
       api.getCoachCampaigns(profile.id),
       api.listCoachEvaluations(profile.id),
     ]).then(([nextCampaigns, nextEvaluations]) => {
-      setCampaigns(nextCampaigns);
+      setCampaigns(orderCampaignsForMvp(nextCampaigns));
       setEvaluations(nextEvaluations);
     });
   }, [profile]);
@@ -2842,6 +2890,7 @@ function coachMatrixInputFromForm(
 function CoachCampaignPage() {
   const { campaignId = "" } = useParams();
   const { profile } = useAuth();
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [athletes, setAthletes] = useState<CoachAthleteView[]>([]);
   const [matrixRows, setMatrixRows] = useState<CampaignMatrixStatusRow[]>([]);
   const [coachMatrixForm, setCoachMatrixForm] =
@@ -2854,15 +2903,19 @@ function CoachCampaignPage() {
     if (!profile) {
       return;
     }
-    const [nextAthletes, nextGrowthReviews] = await Promise.all([
+    const [nextCampaign, nextAthletes, nextGrowthReviews] = await Promise.all([
+      api.getCampaign(campaignId),
       api.getCoachAthletes(campaignId),
       enablePlayerGrowthMatrix
         ? api.getCoachGrowthReviews(campaignId, profile.id)
         : Promise.resolve([]),
     ]);
-    const nextMatrixRows = enableCampaignEvaluationMatrix
-      ? await api.getCampaignMatrixStatus(campaignId)
-      : [];
+    const nextIsU24Campaign = isU24Campaign(nextCampaign);
+    const nextMatrixRows =
+      enableCampaignEvaluationMatrix && nextIsU24Campaign
+        ? await api.getCampaignMatrixStatus(campaignId)
+        : [];
+    setCampaign(nextCampaign);
     setAthletes(nextAthletes);
     setGrowthReviews(nextGrowthReviews);
     setMatrixRows(nextMatrixRows);
@@ -2965,11 +3018,12 @@ function CoachCampaignPage() {
       latestReviewByAthlete.set(review.athlete_id, review);
     }
   }
+  const showCampaignMatrix = enableCampaignEvaluationMatrix && isU24Campaign(campaign);
 
   return (
     <>
       <PageHead
-        title="Assigned Players"
+        title={campaign ? `${campaign.name} players` : "Assigned Players"}
         subtitle="Coach-safe player list for this campaign."
         eyebrow="Coach"
       />
@@ -2980,8 +3034,8 @@ function CoachCampaignPage() {
               <th>Player</th>
               <th>Phone</th>
               <th>Profile</th>
-              {enableCampaignEvaluationMatrix ? <th>Player matrix</th> : null}
-              {enableCampaignEvaluationMatrix ? <th>Coach matrix</th> : null}
+              {showCampaignMatrix ? <th>Player matrix</th> : null}
+              {showCampaignMatrix ? <th>Coach matrix</th> : null}
               {enablePlayerGrowthMatrix ? <th>Growth Matrix</th> : null}
               <th>Action</th>
             </tr>
@@ -2995,10 +3049,8 @@ function CoachCampaignPage() {
                   <td>{athlete.preferred_name || athlete.legal_name || "Unknown athlete"}</td>
                   <td>{athlete.phone ?? "-"}</td>
                   <td>{athlete.profile_status}</td>
-                  {enableCampaignEvaluationMatrix ? (
-                    <td>{matrixRow?.playerStatus ?? "not_started"}</td>
-                  ) : null}
-                  {enableCampaignEvaluationMatrix ? (
+                  {showCampaignMatrix ? <td>{matrixRow?.playerStatus ?? "not_started"}</td> : null}
+                  {showCampaignMatrix ? (
                     <td>
                       <button
                         type="button"
@@ -3045,7 +3097,7 @@ function CoachCampaignPage() {
           </tbody>
         </table>
       </section>
-      {enableCampaignEvaluationMatrix ? (
+      {showCampaignMatrix ? (
         <section className="card stack">
           <div className="section-title">
             <h2>U24 coach matrix assessment</h2>
