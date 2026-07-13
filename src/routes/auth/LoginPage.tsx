@@ -12,6 +12,7 @@ const demoAccounts = [
   { email: "coach@sufa.test", label: "Coach" },
   { email: "alice@sufa.test", label: "Player (Alice - Matrix)" },
   { email: "derrick@sufa.test", label: "Player (Derrick)" },
+  { email: "elle@sufa.test", label: "Player (Elle - first login)" },
 ] as const;
 
 export function LoginPage() {
@@ -35,7 +36,11 @@ export function LoginPage() {
         return;
       }
       if (result.status === "unknown_email") {
-        setStatus({ tone: "warn", message: "No SUFA CRM account was found for that email." });
+        setStatus({
+          tone: "warn",
+          message:
+            "This email is not on a campaign roster. Ask your campaign admin to add you, then try again.",
+        });
         return;
       }
       setStatus({ tone: "ok", message: "Check your email for your login link." });

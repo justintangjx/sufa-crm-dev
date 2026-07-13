@@ -1,9 +1,5 @@
 import { Badge, StatCard } from "../../components/shell/PagePrimitives";
-import type {
-  CampaignMatrixStatusRow,
-  GrowthReviewWithDetails,
-  NpsCoachReportRow,
-} from "../../data/types";
+import type { CampaignMatrixStatusRow, GrowthReviewWithDetails, NpsReport } from "../../data/types";
 import { canShareGrowthReview, getQuadrantInfo } from "../../lib/playerGrowth";
 import { growthStatusTone } from "../player/PlayerCampaignPanels";
 import type { CampaignTryoutBriefing, EvaluationAuditEvent } from "../../types/database";
@@ -108,7 +104,7 @@ export function AdminLiveMatrixPanel({
   rows: CampaignMatrixStatusRow[];
   auditEvents: EvaluationAuditEvent[];
 }) {
-  const playerSubmitted = rows.filter((row) => row.playerStatus === "submitted").length;
+  const playerSubmitted = rows.filter((row) => row.playerSubmittedCount > 0).length;
   const coachSubmitted = rows.reduce((total, row) => total + row.submittedCoachCount, 0);
 
   return (
@@ -144,8 +140,9 @@ export function AdminLiveMatrixPanel({
           <thead>
             <tr>
               <th>Player</th>
-              <th>Player matrix</th>
-              <th>Coach submissions</th>
+              <th>Latest status</th>
+              <th>Self-evals submitted</th>
+              <th>Coaches submitted</th>
               <th>Player notes</th>
             </tr>
           </thead>
@@ -154,6 +151,7 @@ export function AdminLiveMatrixPanel({
               <tr key={row.athleteId}>
                 <td>{row.athleteName}</td>
                 <td>{row.playerStatus}</td>
+                <td>{row.playerSubmittedCount}</td>
                 <td>{row.submittedCoachCount}</td>
                 <td>{row.playerSubmission?.development_focus ?? "-"}</td>
               </tr>
@@ -188,7 +186,7 @@ export function AdminNpsPanel({
   onCloseMid,
   onClosePost,
 }: {
-  report: NpsCoachReportRow[];
+  report: NpsReport;
   onOpenMid: () => void;
   onOpenPost: () => void;
   onCloseMid: () => void;
@@ -197,7 +195,7 @@ export function AdminNpsPanel({
   return (
     <section className="card stack">
       <div className="section-title">
-        <h2>Coach NPS</h2>
+        <h2>Campaign NPS</h2>
         <Badge>anonymous aggregate</Badge>
       </div>
       <div className="btn-row">
@@ -214,33 +212,64 @@ export function AdminNpsPanel({
           Close post-season
         </button>
       </div>
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Survey</th>
-              <th>Coach</th>
-              <th>Responses</th>
-              <th>Average</th>
-              <th>NPS</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.map((row) => (
-              <tr key={`${row.surveyId}-${row.coachProfileId}`}>
-                <td>{row.surveyTitle}</td>
-                <td>{row.coachName}</td>
-                <td>{row.responseCount}</td>
-                <td>{row.withheld ? "Withheld" : row.averageScore}</td>
-                <td>{row.withheld ? "Threshold not met" : row.nps}</td>
+      <div className="stack">
+        <strong>Players rating coaches</strong>
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Survey</th>
+                <th>Coach</th>
+                <th>Responses</th>
+                <th>Average</th>
+                <th>NPS</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {report.coachRows.map((row) => (
+                <tr key={`${row.surveyId}-${row.coachProfileId}`}>
+                  <td>{row.surveyTitle}</td>
+                  <td>{row.coachName}</td>
+                  <td>{row.responseCount}</td>
+                  <td>{row.withheld ? "Withheld" : row.averageScore}</td>
+                  <td>{row.withheld ? "Threshold not met" : row.nps}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="stack">
+        <strong>Coaches rating players</strong>
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Survey</th>
+                <th>Player</th>
+                <th>Responses</th>
+                <th>Average</th>
+                <th>NPS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.playerRows.map((row) => (
+                <tr key={`${row.surveyId}-${row.athleteId}`}>
+                  <td>{row.surveyTitle}</td>
+                  <td>{row.athleteName}</td>
+                  <td>{row.responseCount}</td>
+                  <td>{row.withheld ? "Withheld" : row.averageScore}</td>
+                  <td>{row.withheld ? "Threshold not met" : row.nps}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
       <p className="muted">
-        Raw player responses are not shown here. Coach KPI reporting unlocks only once the survey
-        threshold is met.
+        Raw responses are never shown here. Aggregates unlock only once each direction&apos;s
+        response threshold is met (player-rater and coach-rater thresholds differ because coach
+        pools are small).
       </p>
     </section>
   );

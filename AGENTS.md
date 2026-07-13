@@ -46,8 +46,22 @@ pnpm format   # before finishing
 
 Do not weaken assertions, disable RLS, or skip tests to pass. Keep `pnpm lint:strict` clean on touched code.
 
+## Migrations
+
+Production data may not match schema intent (legacy triggers and hand-run seed scripts have
+left dirty states before). Any migration that adds a uniqueness constraint, backfills, or
+otherwise assumes a data invariant must:
+
+1. State the invariants it assumes.
+2. Ship read-only **pre-flight audit queries** for the human to run against production first
+   (agents have no direct DB access; migrations are applied manually via the SQL Editor).
+3. Either handle violations defensively in the migration or fail loudly — never silently
+   pick a row (`limit 1`) where duplicates are possible.
+4. Declare new invariants as constraints/unique indexes in the same migration, not just in
+   application code.
+
 ## Definition of done
 
-1. `pnpm typecheck` 2. `pnpm lint` 3. `pnpm format` 4. Relevant tests pass 5. RLS/role boundaries intact 6. New infra behind flags with fallback
+1. `pnpm typecheck` 2. `pnpm lint` 3. `pnpm format` 4. Relevant tests pass 5. RLS/role boundaries intact 6. New infra behind flags with fallback 7. Migrations state assumed invariants + include pre-flight audit queries
 
 Final responses must state manual **Supabase** and **Cloudflare** work required, or "none".

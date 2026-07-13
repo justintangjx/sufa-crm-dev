@@ -1,7 +1,8 @@
 // In-memory mock store with localStorage persistence. Backs the offline mock API.
 import { buildSeed, type MockData } from "./seed";
 
-const DATA_KEY = "sufa-mock-data";
+// Versioned: bump when the seed shape changes so stale localStorage is discarded.
+const DATA_KEY = "sufa-mock-data-v2";
 const USER_KEY = "sufa-mock-user";
 
 function hasStorage(): boolean {

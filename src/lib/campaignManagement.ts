@@ -6,7 +6,11 @@ import type {
   PlayerMatrixSubmission,
 } from "../types/database";
 
-export const DEFAULT_NPS_MIN_RESPONSE_COUNT = 3;
+// Direction-specific reporting thresholds: many players rate each coach, but
+// only a couple of coaches rate each player, so player aggregates need a lower
+// minimum or they would always be withheld.
+export const DEFAULT_NPS_MIN_PLAYER_RATER_COUNT = 3;
+export const DEFAULT_NPS_MIN_COACH_RATER_COUNT = 2;
 
 export type LiveMatrixScoreKey =
   | "skill_score"
@@ -93,7 +97,7 @@ export interface NpsAggregate {
 
 export function aggregateNps(
   responses: readonly Pick<CampaignNpsResponse, "score">[],
-  minResponseCount = DEFAULT_NPS_MIN_RESPONSE_COUNT,
+  minResponseCount = DEFAULT_NPS_MIN_PLAYER_RATER_COUNT,
 ): NpsAggregate {
   const responseCount = responses.length;
   if (responseCount < minResponseCount) {

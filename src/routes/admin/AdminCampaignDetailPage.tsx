@@ -7,7 +7,7 @@ import type {
   CampaignMatrixStatusRow,
   CampaignReadinessEntry,
   GrowthReviewWithDetails,
-  NpsCoachReportRow,
+  NpsReport,
 } from "../../data/types";
 import { draftPlayerReminder, summarizeCampaignReadiness } from "../../lib/assistant";
 import { campaignCapabilities } from "../../lib/campaignCapabilities";
@@ -41,7 +41,8 @@ export function AdminCampaignDetailPage() {
   const [growthReviews, setGrowthReviews] = useState<GrowthReviewWithDetails[]>([]);
   const [matrixRows, setMatrixRows] = useState<CampaignMatrixStatusRow[]>([]);
   const [auditEvents, setAuditEvents] = useState<EvaluationAuditEvent[]>([]);
-  const [npsReport, setNpsReport] = useState<NpsCoachReportRow[]>([]);
+  const [npsReport, setNpsReport] = useState<NpsReport>({ coachRows: [], playerRows: [] });
+  const [newPlayer, setNewPlayer] = useState({ name: "", email: "" });
   const [drafting, setDrafting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [assistantResponse, setAssistantResponse] = useState<string | null>(null);
@@ -81,7 +82,7 @@ export function AdminCampaignDetailPage() {
     if (campaignCapabilities(nextCampaign).coachNps) {
       setNpsReport(await api.getNpsReport(campaignId));
     } else {
-      setNpsReport([]);
+      setNpsReport({ coachRows: [], playerRows: [] });
     }
     void loadGrowthMatrixAdmin();
   }, [campaignId, loadGrowthMatrixAdmin]);
@@ -208,6 +209,32 @@ export function AdminCampaignDetailPage() {
     await loadCampaignDetail();
   }
 
+  async function handleCreateAndAssignPlayer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newPlayer.name.trim() || !newPlayer.email.trim()) {
+      setMessage("New players need a name and a login email.");
+      return;
+    }
+    try {
+      const created = await api.createAthlete({
+        legalName: newPlayer.name,
+        email: newPlayer.email,
+      });
+      await api.assignCampaignMember({
+        campaignId,
+        athleteId: created.id,
+        status: "invited",
+      });
+      setMessage(
+        `${created.legal_name ?? "Player"} added to the roster and invited to ${campaign?.name ?? "this campaign"}. Complete their details on the Players page.`,
+      );
+      setNewPlayer({ name: "", email: "" });
+      await loadCampaignDetail();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not add the player.");
+    }
+  }
+
   async function handleSaveNpsSurvey(
     window: "mid_season" | "post_season",
     status: "open" | "closed",
@@ -217,12 +244,11 @@ export function AdminCampaignDetailPage() {
     }
     await api.saveNpsSurvey({
       campaignId,
-      title: `${campaign.name} ${window === "mid_season" ? "mid-season" : "post-season"} coach NPS`,
+      title: `${campaign.name} ${window === "mid_season" ? "mid-season" : "post-season"} NPS`,
       window,
       status,
       opensAt: status === "open" ? new Date().toISOString() : null,
       closesAt: status === "closed" ? new Date().toISOString() : null,
-      minResponseCount: 3,
       createdBy: profile.id,
     });
     setMessage(`NPS survey ${status === "open" ? "opened" : "closed"}.`);
@@ -323,6 +349,41 @@ export function AdminCampaignDetailPage() {
         ) : (
           <p className="muted">All athletes are already assigned to this campaign.</p>
         )}
+        <form
+          className="grid cols-3 assignment-form"
+          onSubmit={(event) => void handleCreateAndAssignPlayer(event)}
+        >
+          <div className="field">
+            <label htmlFor="new-player-name">New player name</label>
+            <input
+              id="new-player-name"
+              type="text"
+              value={newPlayer.name}
+              onChange={(event) =>
+                setNewPlayer((current) => ({ ...current, name: event.target.value }))
+              }
+              placeholder="Full name"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="new-player-email">Login email</label>
+            <input
+              id="new-player-email"
+              type="email"
+              value={newPlayer.email}
+              onChange={(event) =>
+                setNewPlayer((current) => ({ ...current, email: event.target.value }))
+              }
+              placeholder="player@example.com"
+            />
+          </div>
+          <div className="field field-action">
+            <label aria-hidden="true">&nbsp;</label>
+            <button type="submit" className="btn">
+              Add and invite player
+            </button>
+          </div>
+        </form>
         <p className="muted">
           Assigned players can see the campaign from their player dashboard. Coach evaluations and
           Growth Matrix drafts remain hidden until the correct review/share steps happen.

@@ -14,7 +14,9 @@ import type {
   CoachMatrixAssessment,
   EvaluationAuditEvent,
   EvaluationStatus,
+  Gender,
   MatrixSubmissionStatus,
+  NpsRaterKind,
   NpsSurveyStatus,
   NpsSurveyWindow,
   PlayerMatrixSubmission,
@@ -53,6 +55,25 @@ export type AthletePatch = Partial<
     | "data_sharing_consent"
     | "media_consent"
     | "profile_status"
+  >
+>;
+
+// Admin-created roster player. Email is the login key: the player signs in
+// with a magic link to this address and gets linked on first login.
+export interface CreateAthleteInput {
+  legalName: string;
+  preferredName?: string | null;
+  email: string;
+  gender?: Gender | null;
+  dateOfBirth?: string | null;
+  positions?: string[];
+}
+
+// Admin-editable roster fields. Email changes are blocked once a login is linked.
+export type AdminAthletePatch = Partial<
+  Pick<
+    Athlete,
+    "legal_name" | "preferred_name" | "email" | "gender" | "date_of_birth" | "positions"
   >
 >;
 
@@ -196,6 +217,8 @@ export interface CoachMatrixInput {
   status: MatrixSubmissionStatus;
 }
 
+// Status derives from the latest activity per tuple: the open draft if one
+// exists, otherwise the most recent submitted row.
 export interface CampaignMatrixStatusRow {
   athleteId: string;
   athleteName: string;
@@ -203,6 +226,7 @@ export interface CampaignMatrixStatusRow {
   playerSubmission: PlayerMatrixSubmission | null;
   coachAssessments: CoachMatrixAssessment[];
   playerStatus: MatrixSubmissionStatus | "not_started";
+  playerSubmittedCount: number;
   submittedCoachCount: number;
 }
 
@@ -222,36 +246,42 @@ export interface NpsSurveyInput {
   status: NpsSurveyStatus;
   opensAt?: string | null;
   closesAt?: string | null;
-  minResponseCount?: number;
+  minPlayerRaterCount?: number;
+  minCoachRaterCount?: number;
   createdBy: string;
+}
+
+// A rating target for an open survey: coaches for player raters, players for
+// coach raters. For coach targets `id` is a profile id; for player targets it
+// is an athlete id.
+export interface NpsTaskTarget {
+  id: string;
+  kind: NpsRaterKind;
+  name: string;
+  alreadyResponded: boolean;
 }
 
 export interface NpsTask {
   survey: CampaignNpsSurvey;
   assignmentId: string;
   status: "pending" | "completed";
-  coaches: {
-    profileId: string;
-    name: string;
-    alreadyResponded: boolean;
-  }[];
+  targets: NpsTaskTarget[];
 }
 
 export interface NpsResponseInput {
   surveyId: string;
   assignmentId: string;
-  athleteId: string;
-  targetCoachProfileId: string;
+  raterProfileId: string;
+  subjectCoachProfileId?: string | null;
+  subjectAthleteId?: string | null;
   score: number;
   comment?: string | null;
 }
 
-export interface NpsCoachReportRow {
+interface NpsReportAggregate {
   surveyId: string;
   surveyTitle: string;
   surveyWindow: NpsSurveyWindow;
-  coachProfileId: string;
-  coachName: string;
   responseCount: number;
   averageScore: number | null;
   nps: number | null;
@@ -259,6 +289,21 @@ export interface NpsCoachReportRow {
   passiveCount: number;
   detractorCount: number;
   withheld: boolean;
+}
+
+export interface NpsCoachReportRow extends NpsReportAggregate {
+  coachProfileId: string;
+  coachName: string;
+}
+
+export interface NpsPlayerReportRow extends NpsReportAggregate {
+  athleteId: string;
+  athleteName: string;
+}
+
+export interface NpsReport {
+  coachRows: NpsCoachReportRow[];
+  playerRows: NpsPlayerReportRow[];
 }
 
 export interface Api {
@@ -271,6 +316,8 @@ export interface Api {
   getCampaignsForProfile(profileId: string): Promise<CampaignWithMembership[]>;
 
   listAthletes(): Promise<Athlete[]>;
+  createAthlete(input: CreateAthleteInput): Promise<Athlete>;
+  updateAthleteAsAdmin(athleteId: string, patch: AdminAthletePatch): Promise<Athlete>;
   getAdminStats(): Promise<AdminStats>;
   listCampaigns(): Promise<Campaign[]>;
   getCampaign(id: string): Promise<Campaign | null>;
@@ -280,22 +327,34 @@ export interface Api {
   getCampaignOperatingSummary(campaignId: string): Promise<CampaignOperatingSummary>;
   getCampaignMatrixStatus(campaignId: string): Promise<CampaignMatrixStatusRow[]>;
   listEvaluationAuditEvents(campaignId: string): Promise<EvaluationAuditEvent[]>;
-  getPlayerMatrixSubmission(
+  // Matrix evaluations are an append-only history: at most one open draft per
+  // tuple, unlimited immutable submitted rows. Saves target the open draft
+  // (creating one when absent); submitting freezes the row.
+  getPlayerMatrixDraft(
     campaignId: string,
     athleteId: string,
   ): Promise<PlayerMatrixSubmission | null>;
+  listPlayerMatrixSubmissions(
+    campaignId: string,
+    athleteId: string,
+  ): Promise<PlayerMatrixSubmission[]>;
   savePlayerMatrixSubmission(input: PlayerMatrixInput): Promise<PlayerMatrixSubmission>;
-  getCoachMatrixAssessment(
+  getCoachMatrixDraft(
     campaignId: string,
     athleteId: string,
     coachProfileId: string,
   ): Promise<CoachMatrixAssessment | null>;
+  listCoachMatrixAssessments(
+    campaignId: string,
+    athleteId: string,
+  ): Promise<CoachMatrixAssessment[]>;
   saveCoachMatrixAssessment(input: CoachMatrixInput): Promise<CoachMatrixAssessment>;
   listNpsSurveys(campaignId: string): Promise<CampaignNpsSurvey[]>;
   saveNpsSurvey(input: NpsSurveyInput): Promise<CampaignNpsSurvey>;
   listPlayerNpsTasks(profileId: string, campaignId?: string): Promise<NpsTask[]>;
+  listCoachNpsTasks(coachProfileId: string, campaignId?: string): Promise<NpsTask[]>;
   submitNpsResponse(input: NpsResponseInput): Promise<void>;
-  getNpsReport(campaignId: string): Promise<NpsCoachReportRow[]>;
+  getNpsReport(campaignId: string): Promise<NpsReport>;
   listChangeRequests(): Promise<ChangeRequestView[]>;
   reviewChangeRequest(
     id: string,

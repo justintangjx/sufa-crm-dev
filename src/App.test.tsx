@@ -5,15 +5,13 @@ import { api, resetData } from "./data";
 import { TestApp } from "./routes";
 
 async function submitNpsFor(profileId: string, score: number) {
-  const athlete = await api.getAthleteForProfile(profileId);
   const task = (await api.listPlayerNpsTasks(profileId, "c-u24"))[0];
-  expect(athlete).not.toBeNull();
   expect(task).toBeDefined();
   await api.submitNpsResponse({
     surveyId: "nps-u24-mid",
     assignmentId: task?.assignmentId ?? "",
-    athleteId: athlete?.id ?? "",
-    targetCoachProfileId: "p-coach",
+    raterProfileId: profileId,
+    subjectCoachProfileId: "p-coach",
     score,
   });
 }
@@ -249,7 +247,7 @@ describe("App routing", () => {
     render(<TestApp initialEntries={["/admin/campaigns/c-sea"]} />);
 
     expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText(/player/i), "a-derrick");
+    await user.selectOptions(screen.getByLabelText(/^player$/i), "a-derrick");
     await user.selectOptions(screen.getByLabelText(/assignment status/i), "registered");
     await user.click(screen.getByRole("button", { name: /assign player/i }));
 
@@ -348,7 +346,9 @@ describe("App routing", () => {
   it("withholds NPS aggregates until the anonymity threshold is met", async () => {
     let report = await api.getNpsReport("c-u24");
     const coachLimMid = () =>
-      report.find((row) => row.surveyId === "nps-u24-mid" && row.coachProfileId === "p-coach");
+      report.coachRows.find(
+        (row) => row.surveyId === "nps-u24-mid" && row.coachProfileId === "p-coach",
+      );
     expect(coachLimMid()?.withheld).toBe(true);
 
     await submitNpsFor("p-alice", 10);
@@ -363,6 +363,110 @@ describe("App routing", () => {
       withheld: false,
       nps: 33,
     });
+  });
+
+  it("applies the lower coach-rater threshold for coach-rates-player aggregates", async () => {
+    const coachTask = (await api.listCoachNpsTasks("p-coach", "c-u24"))[0];
+    expect(coachTask).toBeDefined();
+    expect(coachTask?.targets.every((target) => target.kind === "player")).toBe(true);
+
+    await api.submitNpsResponse({
+      surveyId: "nps-u24-mid",
+      assignmentId: coachTask?.assignmentId ?? "",
+      raterProfileId: "p-coach",
+      subjectAthleteId: "a-alice",
+      score: 9,
+    });
+    let report = await api.getNpsReport("c-u24");
+    const aliceMid = () =>
+      report.playerRows.find(
+        (row) => row.surveyId === "nps-u24-mid" && row.athleteId === "a-alice",
+      );
+    expect(aliceMid()?.withheld).toBe(true);
+
+    const coach2Task = (await api.listCoachNpsTasks("p-coach-2", "c-u24"))[0];
+    await api.submitNpsResponse({
+      surveyId: "nps-u24-mid",
+      assignmentId: coach2Task?.assignmentId ?? "",
+      raterProfileId: "p-coach-2",
+      subjectAthleteId: "a-alice",
+      score: 7,
+    });
+    report = await api.getNpsReport("c-u24");
+    expect(aliceMid()).toMatchObject({
+      responseCount: 2,
+      withheld: false,
+    });
+  });
+
+  it("keeps submitted evaluations immutable while allowing repeat submissions", async () => {
+    const first = await api.savePlayerMatrixSubmission({
+      campaignId: "c-u24",
+      athleteId: "a-ben",
+      submittedBy: "p-ben",
+      skillScore: 3,
+      status: "submitted",
+    });
+    expect(first.status).toBe("submitted");
+
+    const second = await api.savePlayerMatrixSubmission({
+      campaignId: "c-u24",
+      athleteId: "a-ben",
+      submittedBy: "p-ben",
+      skillScore: 4,
+      status: "submitted",
+    });
+    expect(second.id).not.toBe(first.id);
+
+    const history = await api.listPlayerMatrixSubmissions("c-u24", "a-ben");
+    expect(history).toHaveLength(2);
+    expect(history.map((entry) => entry.skill_score)).toEqual(expect.arrayContaining([3, 4]));
+
+    const draft = await api.savePlayerMatrixSubmission({
+      campaignId: "c-u24",
+      athleteId: "a-ben",
+      submittedBy: "p-ben",
+      skillScore: 5,
+      status: "draft",
+    });
+    expect(await api.getPlayerMatrixDraft("c-u24", "a-ben")).toMatchObject({ id: draft.id });
+    expect(await api.listPlayerMatrixSubmissions("c-u24", "a-ben")).toHaveLength(2);
+  });
+
+  it("provisions a roster-only player on first login and registers memberships", async () => {
+    const result = await api.signIn("elle@sufa.test");
+    expect(result.status).toBe("signed_in");
+
+    const athletes = await api.listAthletes();
+    const elle = athletes.find((athlete) => athlete.email === "elle@sufa.test");
+    expect(elle?.profile_id).not.toBeNull();
+
+    const flow = await api.getPlayerCampaignFlow(elle?.profile_id ?? "", "c-u24");
+    expect(flow?.memberStatus).toBe("registered");
+  });
+
+  it("rejects sign-in for emails that are not on any roster", async () => {
+    const result = await api.signIn("stranger@sufa.test");
+    expect(result.status).toBe("unknown_email");
+  });
+
+  it("lets an admin create a roster player and blocks duplicate emails", async () => {
+    const created = await api.createAthlete({
+      legalName: "Fay Ho",
+      email: "fay@sufa.test",
+      gender: "female",
+      positions: ["cutter"],
+    });
+    expect(created.profile_id).toBeNull();
+    expect(created.positions).toEqual(["cutter"]);
+
+    await expect(
+      api.createAthlete({ legalName: "Fay Two", email: "FAY@sufa.test" }),
+    ).rejects.toThrow(/already exists/i);
+
+    await expect(
+      api.updateAthleteAsAdmin("a-alice", { email: "new-alice@sufa.test" }),
+    ).rejects.toThrow(/cannot be changed/i);
   });
 
   it("lets a coach structure rough notes and submit an evaluation", async () => {

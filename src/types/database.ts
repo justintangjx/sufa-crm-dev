@@ -5,6 +5,8 @@ export type Role = "player" | "admin" | "coach";
 
 export type ProfileStatus = "incomplete" | "submitted" | "approved";
 
+export type Gender = "female" | "male" | "other";
+
 export type CampaignStatus = "draft" | "active" | "completed" | "archived";
 
 export type CampaignMemberStatus = "invited" | "registered" | "selected" | "reserve" | "withdrawn";
@@ -70,6 +72,9 @@ export interface Profile {
 export interface Athlete {
   id: string;
   profile_id: string | null;
+  email: string | null;
+  gender: Gender | null;
+  positions: string[];
   legal_name: string | null;
   preferred_name: string | null;
   date_of_birth: string | null;
@@ -225,6 +230,9 @@ export interface CoachAthleteView {
   legal_name: string | null;
   preferred_name: string | null;
   phone: string | null;
+  gender: Gender | null;
+  positions: string[];
+  date_of_birth: string | null;
   profile_status: ProfileStatus;
   created_at: string;
   updated_at: string;
@@ -348,6 +356,8 @@ export interface EvaluationAuditEvent {
   created_at: string;
 }
 
+export type NpsRaterKind = "player" | "coach";
+
 export interface CampaignNpsSurvey {
   id: string;
   campaign_id: string;
@@ -356,7 +366,8 @@ export interface CampaignNpsSurvey {
   status: NpsSurveyStatus;
   opens_at: string | null;
   closes_at: string | null;
-  min_response_count: number;
+  min_player_rater_count: number;
+  min_coach_rater_count: number;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -365,18 +376,23 @@ export interface CampaignNpsSurvey {
 export interface CampaignNpsAssignment {
   id: string;
   survey_id: string;
-  athlete_id: string;
+  rater_kind: NpsRaterKind;
+  athlete_id: string | null;
+  coach_profile_id: string | null;
   status: NpsAssignmentStatus;
   completed_at: string | null;
   created_at: string;
 }
 
+// Rater is always an auth profile; the subject is exactly one of an athlete
+// (coach rates player) or a coach profile (player rates coach).
 export interface CampaignNpsResponse {
   id: string;
   survey_id: string;
   assignment_id: string;
-  athlete_id: string;
-  target_coach_profile_id: string;
+  rater_profile_id: string;
+  subject_athlete_id: string | null;
+  subject_coach_profile_id: string | null;
   score: number;
   comment: string | null;
   created_at: string;

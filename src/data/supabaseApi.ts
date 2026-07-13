@@ -14,7 +14,8 @@ import { useRemoteCoachLlm } from "../lib/env";
 import {
   aggregateNps,
   auditEventForSave,
-  DEFAULT_NPS_MIN_RESPONSE_COUNT,
+  DEFAULT_NPS_MIN_COACH_RATER_COUNT,
+  DEFAULT_NPS_MIN_PLAYER_RATER_COUNT,
 } from "../lib/campaignManagement";
 import {
   invokeCoachNoteAction,
@@ -41,6 +42,7 @@ import type {
   Profile,
 } from "../types/database";
 import type {
+  AdminAthletePatch,
   Api,
   AthletePatch,
   CampaignMatrixStatusRow,
@@ -49,15 +51,17 @@ import type {
   CampaignWithMembership,
   ChangeRequestView,
   CoachMatrixInput,
+  CreateAthleteInput,
   EvaluationInput,
   GrowthReviewInput,
   GrowthReviewWithDetails,
   NewAssistantDraft,
   NewCampaign,
-  NpsCoachReportRow,
+  NpsReport,
   NpsResponseInput,
   NpsSurveyInput,
   NpsTask,
+  NpsTaskTarget,
   PlayerMatrixInput,
   SignInResult,
   TryoutBriefingInput,
@@ -65,6 +69,7 @@ import type {
 import type { CoachNoteActionRequest, CoachNoteGenerationRequest } from "../lib/coachNotes";
 import { executeDeterministicCoachNoteAction } from "./coachNoteExecutor";
 import { createSupabaseCoachNotePersistence } from "./coachNoteSupabasePersistence";
+import { athleteFieldsFromCreateInput, normalizeEmail } from "./payloads/athlete";
 import { briefingFieldsFromInput } from "./payloads/briefing";
 import { displayName, profileDisplayName } from "./payloads/display";
 import {
@@ -130,6 +135,14 @@ async function growthReviewDetails(
   }));
 }
 
+function latestMatrixFirst<T extends { submitted_at: string | null; updated_at: string }>(
+  rows: T[],
+): T[] {
+  return rows.toSorted((left, right) =>
+    (right.submitted_at ?? right.updated_at).localeCompare(left.submitted_at ?? left.updated_at),
+  );
+}
+
 function playerMatrixPayload(input: PlayerMatrixInput) {
   return {
     ...playerMatrixFieldsFromInput(input),
@@ -181,6 +194,39 @@ async function listCampaignCoachProfiles(campaignId: string) {
   }[];
 }
 
+type NpsAssignmentWithSurvey = CampaignNpsAssignment & {
+  campaign_nps_surveys: CampaignNpsSurvey | null;
+};
+
+async function listOpenNpsAssignments(
+  assignmentQuery: PromiseLike<{ data: unknown; error: unknown }>,
+  campaignId?: string,
+): Promise<NpsAssignmentWithSurvey[]> {
+  const { data: assignments, error } = await assignmentQuery;
+  if (error) {
+    throw error;
+  }
+  return ((assignments ?? []) as unknown as NpsAssignmentWithSurvey[]).filter(
+    (assignment) =>
+      assignment.campaign_nps_surveys?.status === "open" &&
+      (!campaignId || assignment.campaign_nps_surveys.campaign_id === campaignId),
+  );
+}
+
+function openNpsCampaignIds(assignments: NpsAssignmentWithSurvey[]): string[] {
+  return [
+    ...new Set(assignments.map((assignment) => assignment.campaign_nps_surveys?.campaign_id)),
+  ].filter((id): id is string => Boolean(id));
+}
+
+async function listOwnNpsResponses(raterProfileId: string): Promise<CampaignNpsResponse[]> {
+  const { data: responses } = await client()
+    .from("campaign_nps_responses")
+    .select("*")
+    .eq("rater_profile_id", raterProfileId);
+  return (responses ?? []) as CampaignNpsResponse[];
+}
+
 export const supabaseApi: Api = {
   async getCurrentProfile(): Promise<Profile | null> {
     const { data: userData } = await client().auth.getUser();
@@ -193,6 +239,18 @@ export const supabaseApi: Api = {
   },
 
   async signIn(email: string): Promise<SignInResult> {
+    // Closed roster: reject unknown emails before any OTP is sent. The signup
+    // trigger (handle_new_user) is the backstop that links the athlete row.
+    const { data: allowed, error: gateError } = await client().rpc(
+      "can_request_player_magic_link",
+      { p_email: email },
+    );
+    if (gateError) {
+      throw gateError;
+    }
+    if (allowed === false) {
+      return { status: "unknown_email" };
+    }
     const { error } = await client().auth.signInWithOtp({
       email,
       options: { emailRedirectTo: `${appUrl}/auth/callback` },
@@ -261,6 +319,47 @@ export const supabaseApi: Api = {
   async listAthletes() {
     const { data } = await client().from("athletes").select("*");
     return (data ?? []) as Athlete[];
+  },
+
+  async createAthlete(input: CreateAthleteInput) {
+    const fields = athleteFieldsFromCreateInput(input);
+    if (!fields.email) {
+      throw new Error("Player email is required");
+    }
+    const { data, error } = await client().from("athletes").insert(fields).select("*").single();
+    if (error) {
+      throw error;
+    }
+    return data as Athlete;
+  },
+
+  async updateAthleteAsAdmin(athleteId: string, patch: AdminAthletePatch) {
+    const { data: existing, error: fetchError } = await client()
+      .from("athletes")
+      .select("*")
+      .eq("id", athleteId)
+      .single();
+    if (fetchError) {
+      throw fetchError;
+    }
+    const athlete = existing as Athlete;
+    if (patch.email !== undefined) {
+      const nextEmail = patch.email ? normalizeEmail(patch.email) : null;
+      if (nextEmail !== (athlete.email?.toLowerCase() ?? null) && athlete.profile_id) {
+        throw new Error("Email cannot be changed after the player has logged in");
+      }
+      patch = { ...patch, email: nextEmail };
+    }
+    const { data, error } = await client()
+      .from("athletes")
+      .update(patch)
+      .eq("id", athleteId)
+      .select("*")
+      .single();
+    if (error) {
+      throw error;
+    }
+    return data as Athlete;
   },
 
   async getAdminStats() {
@@ -393,21 +492,35 @@ export const supabaseApi: Api = {
         athletes: Pick<Athlete, "id" | "legal_name" | "preferred_name">;
       }[]
     ).map((member) => {
+      const playerRows = latestMatrixFirst(
+        submissionRows.filter((submission) => submission.athlete_id === member.athletes.id),
+      );
+      // Latest activity wins: an open draft, otherwise the newest submitted row.
       const playerSubmission =
-        submissionRows.find((submission) => submission.athlete_id === member.athletes.id) ?? null;
-      const coachAssessments = assessmentRows.filter(
+        playerRows.find((submission) => submission.status === "draft") ?? playerRows[0] ?? null;
+      const coachRows = assessmentRows.filter(
         (assessment) => assessment.athlete_id === member.athletes.id,
       );
+      const latestPerCoach = new Map<string, CoachMatrixAssessment>();
+      for (const assessment of latestMatrixFirst(coachRows)) {
+        const current = latestPerCoach.get(assessment.coach_profile_id);
+        if (!current || (assessment.status === "draft" && current.status !== "draft")) {
+          latestPerCoach.set(assessment.coach_profile_id, assessment);
+        }
+      }
       return {
         athleteId: member.athletes.id,
         athleteName: displayName(member.athletes),
         memberStatus: member.status,
         playerSubmission,
-        coachAssessments,
+        coachAssessments: [...latestPerCoach.values()],
         playerStatus: playerSubmission?.status ?? "not_started",
-        submittedCoachCount: coachAssessments.filter(
-          (assessment) => assessment.status === "submitted",
-        ).length,
+        playerSubmittedCount: playerRows.filter((row) => row.status === "submitted").length,
+        submittedCoachCount: new Set(
+          coachRows
+            .filter((assessment) => assessment.status === "submitted")
+            .map((assessment) => assessment.coach_profile_id),
+        ).size,
       };
     });
   },
@@ -424,12 +537,13 @@ export const supabaseApi: Api = {
     return (data ?? []) as EvaluationAuditEvent[];
   },
 
-  async getPlayerMatrixSubmission(campaignId: string, athleteId: string) {
+  async getPlayerMatrixDraft(campaignId: string, athleteId: string) {
     const { data, error } = await client()
       .from("player_matrix_submissions")
       .select("*")
       .eq("campaign_id", campaignId)
       .eq("athlete_id", athleteId)
+      .eq("status", "draft")
       .maybeSingle();
     if (error) {
       throw error;
@@ -437,17 +551,34 @@ export const supabaseApi: Api = {
     return (data as PlayerMatrixSubmission | null) ?? null;
   },
 
-  async savePlayerMatrixSubmission(input: PlayerMatrixInput) {
-    const existing = await supabaseApi.getPlayerMatrixSubmission(input.campaignId, input.athleteId);
-    const eventType = auditEventForSave(existing, input.status);
-    const row = input.id
-      ? { id: input.id, ...playerMatrixPayload(input) }
-      : playerMatrixPayload(input);
+  async listPlayerMatrixSubmissions(campaignId: string, athleteId: string) {
     const { data, error } = await client()
       .from("player_matrix_submissions")
-      .upsert(row, { onConflict: "campaign_id,athlete_id" })
       .select("*")
-      .single();
+      .eq("campaign_id", campaignId)
+      .eq("athlete_id", athleteId)
+      .eq("status", "submitted")
+      .order("submitted_at", { ascending: false });
+    if (error) {
+      throw error;
+    }
+    return (data ?? []) as PlayerMatrixSubmission[];
+  },
+
+  async savePlayerMatrixSubmission(input: PlayerMatrixInput) {
+    // Saves always target the open draft; submitted rows are immutable history.
+    const draft = await supabaseApi.getPlayerMatrixDraft(input.campaignId, input.athleteId);
+    const eventType = auditEventForSave(draft, input.status);
+    const payload = playerMatrixPayload(input);
+    const query = draft
+      ? client()
+          .from("player_matrix_submissions")
+          .update(payload)
+          .eq("id", draft.id)
+          .select("*")
+          .single()
+      : client().from("player_matrix_submissions").insert(payload).select("*").single();
+    const { data, error } = await query;
     if (error) {
       throw error;
     }
@@ -464,13 +595,14 @@ export const supabaseApi: Api = {
     return saved;
   },
 
-  async getCoachMatrixAssessment(campaignId: string, athleteId: string, coachProfileId: string) {
+  async getCoachMatrixDraft(campaignId: string, athleteId: string, coachProfileId: string) {
     const { data, error } = await client()
       .from("coach_matrix_assessments")
       .select("*")
       .eq("campaign_id", campaignId)
       .eq("athlete_id", athleteId)
       .eq("coach_profile_id", coachProfileId)
+      .eq("status", "draft")
       .maybeSingle();
     if (error) {
       throw error;
@@ -478,21 +610,37 @@ export const supabaseApi: Api = {
     return (data as CoachMatrixAssessment | null) ?? null;
   },
 
+  async listCoachMatrixAssessments(campaignId: string, athleteId: string) {
+    const { data, error } = await client()
+      .from("coach_matrix_assessments")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .eq("athlete_id", athleteId)
+      .eq("status", "submitted")
+      .order("submitted_at", { ascending: false });
+    if (error) {
+      throw error;
+    }
+    return (data ?? []) as CoachMatrixAssessment[];
+  },
+
   async saveCoachMatrixAssessment(input: CoachMatrixInput) {
-    const existing = await supabaseApi.getCoachMatrixAssessment(
+    const draft = await supabaseApi.getCoachMatrixDraft(
       input.campaignId,
       input.athleteId,
       input.coachProfileId,
     );
-    const eventType = auditEventForSave(existing, input.status);
-    const row = input.id
-      ? { id: input.id, ...coachMatrixPayload(input) }
-      : coachMatrixPayload(input);
-    const { data, error } = await client()
-      .from("coach_matrix_assessments")
-      .upsert(row, { onConflict: "campaign_id,athlete_id,coach_profile_id" })
-      .select("*")
-      .single();
+    const eventType = auditEventForSave(draft, input.status);
+    const payload = coachMatrixPayload(input);
+    const query = draft
+      ? client()
+          .from("coach_matrix_assessments")
+          .update(payload)
+          .eq("id", draft.id)
+          .select("*")
+          .single()
+      : client().from("coach_matrix_assessments").insert(payload).select("*").single();
+    const { data, error } = await query;
     if (error) {
       throw error;
     }
@@ -535,7 +683,8 @@ export const supabaseApi: Api = {
       status: input.status,
       opens_at: input.opensAt ?? null,
       closes_at: input.closesAt ?? null,
-      min_response_count: input.minResponseCount ?? DEFAULT_NPS_MIN_RESPONSE_COUNT,
+      min_player_rater_count: input.minPlayerRaterCount ?? DEFAULT_NPS_MIN_PLAYER_RATER_COUNT,
+      min_coach_rater_count: input.minCoachRaterCount ?? DEFAULT_NPS_MIN_COACH_RATER_COUNT,
       created_by: input.createdBy,
     };
     const query = existing
@@ -551,18 +700,47 @@ export const supabaseApi: Api = {
       throw error;
     }
     const survey = data as CampaignNpsSurvey;
-    const { data: members } = await client()
-      .from("campaign_members")
-      .select("athlete_id")
-      .eq("campaign_id", input.campaignId);
-    const assignments = ((members ?? []) as { athlete_id: string }[]).map((member) => ({
-      survey_id: survey.id,
-      athlete_id: member.athlete_id,
-    }));
-    if (assignments.length > 0) {
+    // Every roster player rates each coach; every campaign coach rates each
+    // player. Insert only missing assignments (partial unique indexes cannot
+    // be targeted by PostgREST upserts).
+    const [{ data: members }, coaches, { data: existingAssignments }] = await Promise.all([
+      client().from("campaign_members").select("athlete_id").eq("campaign_id", input.campaignId),
+      listCampaignCoachProfiles(input.campaignId),
+      client()
+        .from("campaign_nps_assignments")
+        .select("athlete_id, coach_profile_id")
+        .eq("survey_id", survey.id),
+    ]);
+    const assignmentRows = (existingAssignments ?? []) as {
+      athlete_id: string | null;
+      coach_profile_id: string | null;
+    }[];
+    const assignedAthletes = new Set(
+      assignmentRows.map((row) => row.athlete_id).filter((id): id is string => id !== null),
+    );
+    const assignedCoaches = new Set(
+      assignmentRows.map((row) => row.coach_profile_id).filter((id): id is string => id !== null),
+    );
+    const newAssignments = [
+      ...((members ?? []) as { athlete_id: string }[])
+        .filter((member) => !assignedAthletes.has(member.athlete_id))
+        .map((member) => ({
+          survey_id: survey.id,
+          rater_kind: "player",
+          athlete_id: member.athlete_id,
+        })),
+      ...coaches
+        .filter((coach) => !assignedCoaches.has(coach.coach_profile_id))
+        .map((coach) => ({
+          survey_id: survey.id,
+          rater_kind: "coach",
+          coach_profile_id: coach.coach_profile_id,
+        })),
+    ];
+    if (newAssignments.length > 0) {
       const { error: assignmentError } = await client()
         .from("campaign_nps_assignments")
-        .upsert(assignments, { onConflict: "survey_id,athlete_id" });
+        .insert(newAssignments);
       if (assignmentError) {
         throw assignmentError;
       }
@@ -575,28 +753,17 @@ export const supabaseApi: Api = {
     if (!athlete) {
       return [];
     }
-    let assignmentQuery = client()
-      .from("campaign_nps_assignments")
-      .select("*, campaign_nps_surveys(*)")
-      .eq("athlete_id", athlete.id);
-    if (campaignId) {
-      assignmentQuery = assignmentQuery.eq("campaign_nps_surveys.campaign_id", campaignId);
-    }
-    const { data: assignments, error } = await assignmentQuery;
-    if (error) {
-      throw error;
-    }
-    const openAssignments = (
-      (assignments ?? []) as unknown as (CampaignNpsAssignment & {
-        campaign_nps_surveys: CampaignNpsSurvey | null;
-      })[]
-    ).filter((assignment) => assignment.campaign_nps_surveys?.status === "open");
+    const openAssignments = await listOpenNpsAssignments(
+      client()
+        .from("campaign_nps_assignments")
+        .select("*, campaign_nps_surveys(*)")
+        .eq("athlete_id", athlete.id),
+      campaignId,
+    );
     if (openAssignments.length === 0) {
       return [];
     }
-    const campaignIds = [
-      ...new Set(openAssignments.map((assignment) => assignment.campaign_nps_surveys?.campaign_id)),
-    ].filter((id): id is string => Boolean(id));
+    const campaignIds = openNpsCampaignIds(openAssignments);
     const coachEntries = await Promise.all(
       campaignIds.map(
         async (
@@ -611,11 +778,7 @@ export const supabaseApi: Api = {
       string,
       Awaited<ReturnType<typeof listCampaignCoachProfiles>>
     >(coachEntries);
-    const { data: responses } = await client()
-      .from("campaign_nps_responses")
-      .select("*")
-      .eq("athlete_id", athlete.id);
-    const responseRows = (responses ?? []) as CampaignNpsResponse[];
+    const responseRows = await listOwnNpsResponses(profileId);
     return openAssignments.map((assignment): NpsTask => {
       const survey = assignment.campaign_nps_surveys as CampaignNpsSurvey;
       const coaches = coachesByCampaign.get(survey.campaign_id) ?? [];
@@ -623,50 +786,129 @@ export const supabaseApi: Api = {
         survey,
         assignmentId: assignment.id,
         status: assignment.status,
-        coaches: coaches.map((coach) => ({
-          profileId: coach.coach_profile_id,
-          name: coach.profiles ? profileDisplayName(coach.profiles) : coach.coach_profile_id,
-          alreadyResponded: responseRows.some(
-            (response) =>
-              response.survey_id === survey.id &&
-              response.target_coach_profile_id === coach.coach_profile_id,
-          ),
-        })),
+        targets: coaches.map(
+          (coach): NpsTaskTarget => ({
+            id: coach.coach_profile_id,
+            kind: "coach",
+            name: coach.profiles ? profileDisplayName(coach.profiles) : coach.coach_profile_id,
+            alreadyResponded: responseRows.some(
+              (response) =>
+                response.survey_id === survey.id &&
+                response.subject_coach_profile_id === coach.coach_profile_id,
+            ),
+          }),
+        ),
+      };
+    });
+  },
+
+  async listCoachNpsTasks(coachProfileId: string, campaignId?: string) {
+    const openAssignments = await listOpenNpsAssignments(
+      client()
+        .from("campaign_nps_assignments")
+        .select("*, campaign_nps_surveys(*)")
+        .eq("coach_profile_id", coachProfileId),
+      campaignId,
+    );
+    if (openAssignments.length === 0) {
+      return [];
+    }
+    const campaignIds = openNpsCampaignIds(openAssignments);
+    const athletesByCampaign = new Map<string, CoachAthleteView[]>(
+      await Promise.all(
+        campaignIds.map(
+          async (nextCampaignId): Promise<[string, CoachAthleteView[]]> => [
+            nextCampaignId,
+            await supabaseApi.getCoachAthletes(nextCampaignId),
+          ],
+        ),
+      ),
+    );
+    const responseRows = await listOwnNpsResponses(coachProfileId);
+    return openAssignments.map((assignment): NpsTask => {
+      const survey = assignment.campaign_nps_surveys as CampaignNpsSurvey;
+      const athletes = athletesByCampaign.get(survey.campaign_id) ?? [];
+      return {
+        survey,
+        assignmentId: assignment.id,
+        status: assignment.status,
+        targets: athletes.map(
+          (athlete): NpsTaskTarget => ({
+            id: athlete.id,
+            kind: "player",
+            name: displayName(athlete),
+            alreadyResponded: responseRows.some(
+              (response) =>
+                response.survey_id === survey.id && response.subject_athlete_id === athlete.id,
+            ),
+          }),
+        ),
       };
     });
   },
 
   async submitNpsResponse(input: NpsResponseInput) {
-    const { error } = await client()
+    if (!input.subjectCoachProfileId === !input.subjectAthleteId) {
+      throw new Error("NPS response needs exactly one subject");
+    }
+    // Partial unique indexes cannot be targeted by PostgREST upserts, so
+    // update-or-insert manually. RLS restricts rows to the rater.
+    let existingQuery = client()
       .from("campaign_nps_responses")
-      .upsert(
-        {
-          survey_id: input.surveyId,
-          assignment_id: input.assignmentId,
-          athlete_id: input.athleteId,
-          target_coach_profile_id: input.targetCoachProfileId,
-          score: input.score,
-          comment: input.comment ?? null,
-        },
-        { onConflict: "survey_id,athlete_id,target_coach_profile_id" },
-      );
+      .select("id")
+      .eq("survey_id", input.surveyId)
+      .eq("rater_profile_id", input.raterProfileId);
+    existingQuery = input.subjectCoachProfileId
+      ? existingQuery.eq("subject_coach_profile_id", input.subjectCoachProfileId)
+      : existingQuery.eq("subject_athlete_id", input.subjectAthleteId ?? "");
+    const { data: existing } = await existingQuery.maybeSingle();
+    const payload = {
+      survey_id: input.surveyId,
+      assignment_id: input.assignmentId,
+      rater_profile_id: input.raterProfileId,
+      subject_athlete_id: input.subjectAthleteId ?? null,
+      subject_coach_profile_id: input.subjectCoachProfileId ?? null,
+      score: input.score,
+      comment: input.comment ?? null,
+    };
+    const { error } = existing
+      ? await client()
+          .from("campaign_nps_responses")
+          .update(payload)
+          .eq("id", (existing as { id: string }).id)
+      : await client().from("campaign_nps_responses").insert(payload);
     if (error) {
       throw error;
     }
-    const { data: survey } = await client()
-      .from("campaign_nps_surveys")
-      .select("campaign_id")
-      .eq("id", input.surveyId)
-      .single();
-    const coachProfiles = survey
-      ? await listCampaignCoachProfiles((survey as { campaign_id: string }).campaign_id)
-      : [];
+    const [{ data: assignmentRow }, { data: survey }] = await Promise.all([
+      client()
+        .from("campaign_nps_assignments")
+        .select("rater_kind")
+        .eq("id", input.assignmentId)
+        .single(),
+      client().from("campaign_nps_surveys").select("campaign_id").eq("id", input.surveyId).single(),
+    ]);
+    if (!assignmentRow || !survey) {
+      return;
+    }
+    const surveyCampaignId = (survey as { campaign_id: string }).campaign_id;
+    const raterKind = (assignmentRow as { rater_kind: string }).rater_kind;
+    let targetCount: number;
+    if (raterKind === "player") {
+      targetCount = (await listCampaignCoachProfiles(surveyCampaignId)).length;
+    } else {
+      const { data: memberRows } = await client()
+        .from("campaign_members")
+        .select("id")
+        .eq("campaign_id", surveyCampaignId);
+      targetCount = (memberRows ?? []).length;
+    }
     const { data: responses } = await client()
       .from("campaign_nps_responses")
       .select("id")
       .eq("survey_id", input.surveyId)
-      .eq("athlete_id", input.athleteId);
-    if ((responses ?? []).length >= coachProfiles.length && coachProfiles.length > 0) {
+      .eq("rater_profile_id", input.raterProfileId);
+    if (targetCount > 0 && (responses ?? []).length >= targetCount) {
       const { error: assignmentError } = await client()
         .from("campaign_nps_assignments")
         .update({ status: "completed", completed_at: new Date().toISOString() })
@@ -677,13 +919,17 @@ export const supabaseApi: Api = {
     }
   },
 
-  async getNpsReport(campaignId: string): Promise<NpsCoachReportRow[]> {
-    const [surveys, coaches] = await Promise.all([
+  async getNpsReport(campaignId: string): Promise<NpsReport> {
+    const [surveys, coaches, { data: members }] = await Promise.all([
       supabaseApi.listNpsSurveys(campaignId),
       listCampaignCoachProfiles(campaignId),
+      client()
+        .from("campaign_members")
+        .select("athletes(id, legal_name, preferred_name)")
+        .eq("campaign_id", campaignId),
     ]);
-    if (surveys.length === 0 || coaches.length === 0) {
-      return [];
+    if (surveys.length === 0) {
+      return { coachRows: [], playerRows: [] };
     }
     const { data: responses, error } = await client()
       .from("campaign_nps_responses")
@@ -696,32 +942,55 @@ export const supabaseApi: Api = {
       throw error;
     }
     const responseRows = (responses ?? []) as CampaignNpsResponse[];
-    return surveys.flatMap((survey) =>
+    const memberAthletes = (
+      (members ?? []) as unknown as {
+        athletes: Pick<Athlete, "id" | "legal_name" | "preferred_name">;
+      }[]
+    ).map((member) => member.athletes);
+    const coachRows = surveys.flatMap((survey) =>
       coaches.map((coach) => {
         const aggregate = aggregateNps(
           responseRows.filter(
             (response) =>
               response.survey_id === survey.id &&
-              response.target_coach_profile_id === coach.coach_profile_id,
+              response.subject_coach_profile_id === coach.coach_profile_id,
           ),
-          survey.min_response_count,
+          survey.min_player_rater_count,
         );
-        return {
-          surveyId: survey.id,
-          surveyTitle: survey.title,
-          surveyWindow: survey.survey_window,
-          coachProfileId: coach.coach_profile_id,
-          coachName: coach.profiles ? profileDisplayName(coach.profiles) : coach.coach_profile_id,
-          responseCount: aggregate.responseCount,
-          averageScore: aggregate.averageScore,
-          nps: aggregate.nps,
-          promoterCount: aggregate.promoterCount,
-          passiveCount: aggregate.passiveCount,
-          detractorCount: aggregate.detractorCount,
-          withheld: aggregate.withheld,
-        };
+        return Object.assign(
+          {
+            surveyId: survey.id,
+            surveyTitle: survey.title,
+            surveyWindow: survey.survey_window,
+            coachProfileId: coach.coach_profile_id,
+            coachName: coach.profiles ? profileDisplayName(coach.profiles) : coach.coach_profile_id,
+          },
+          aggregate,
+        );
       }),
     );
+    const playerRows = surveys.flatMap((survey) =>
+      memberAthletes.map((athlete) => {
+        const aggregate = aggregateNps(
+          responseRows.filter(
+            (response) =>
+              response.survey_id === survey.id && response.subject_athlete_id === athlete.id,
+          ),
+          survey.min_coach_rater_count,
+        );
+        return Object.assign(
+          {
+            surveyId: survey.id,
+            surveyTitle: survey.title,
+            surveyWindow: survey.survey_window,
+            athleteId: athlete.id,
+            athleteName: displayName(athlete),
+          },
+          aggregate,
+        );
+      }),
+    );
+    return { coachRows, playerRows };
   },
 
   async listChangeRequests(): Promise<ChangeRequestView[]> {

@@ -11,7 +11,8 @@ import { demoCoachLlm, useRemoteCoachLlm } from "../lib/env";
 import {
   aggregateNps,
   auditEventForSave,
-  DEFAULT_NPS_MIN_RESPONSE_COUNT,
+  DEFAULT_NPS_MIN_COACH_RATER_COUNT,
+  DEFAULT_NPS_MIN_PLAYER_RATER_COUNT,
 } from "../lib/campaignManagement";
 import type { CoachNoteActionRequest, CoachNoteGenerationRequest } from "../lib/coachNotes";
 import {
@@ -37,6 +38,7 @@ import type {
   PriorCoachEvaluation,
 } from "../types/database";
 import type {
+  AdminAthletePatch,
   AdminStats,
   Api,
   AthletePatch,
@@ -46,19 +48,22 @@ import type {
   CampaignWithMembership,
   ChangeRequestView,
   CoachMatrixInput,
+  CreateAthleteInput,
   EvaluationInput,
   GrowthReviewInput,
   GrowthReviewWithDetails,
   NewAssistantDraft,
   NewCampaign,
-  NpsCoachReportRow,
+  NpsReport,
   NpsResponseInput,
   NpsSurveyInput,
   NpsTask,
+  NpsTaskTarget,
   PlayerMatrixInput,
   SignInResult,
   TryoutBriefingInput,
 } from "./types";
+import { athleteFieldsFromCreateInput, normalizeEmail } from "./payloads/athlete";
 import { briefingFieldsFromInput } from "./payloads/briefing";
 import { displayName } from "./payloads/display";
 import {
@@ -225,46 +230,98 @@ function coachMatrixPayload(
   };
 }
 
+function latestFirst<T extends { submitted_at: string | null; updated_at: string }>(
+  rows: T[],
+): T[] {
+  return rows.toSorted((left, right) =>
+    (right.submitted_at ?? right.updated_at).localeCompare(left.submitted_at ?? left.updated_at),
+  );
+}
+
+function findPlayerMatrixDraft(campaignId: string, athleteId: string) {
+  return (
+    getData().playerMatrixSubmissions.find(
+      (submission) =>
+        submission.campaign_id === campaignId &&
+        submission.athlete_id === athleteId &&
+        submission.status === "draft",
+    ) ?? null
+  );
+}
+
+function findCoachMatrixDraft(campaignId: string, athleteId: string, coachProfileId: string) {
+  return (
+    getData().coachMatrixAssessments.find(
+      (assessment) =>
+        assessment.campaign_id === campaignId &&
+        assessment.athlete_id === athleteId &&
+        assessment.coach_profile_id === coachProfileId &&
+        assessment.status === "draft",
+    ) ?? null
+  );
+}
+
 function buildMatrixStatusRows(campaignId: string): CampaignMatrixStatusRow[] {
   const data = getData();
   return data.campaignMembers
     .filter((member) => member.campaign_id === campaignId)
-    .map((member) => {
+    .map((member): CampaignMatrixStatusRow | null => {
       const athlete = findAthlete(member.athlete_id);
       if (!athlete) {
         return null;
       }
-      const playerSubmission =
-        data.playerMatrixSubmissions.find(
+      const playerRows = latestFirst(
+        data.playerMatrixSubmissions.filter(
           (submission) =>
             submission.campaign_id === campaignId && submission.athlete_id === athlete.id,
-        ) ?? null;
-      const coachAssessments = data.coachMatrixAssessments.filter(
+        ),
+      );
+      // Latest activity wins: an open draft, otherwise the newest submitted row.
+      const playerSubmission =
+        playerRows.find((submission) => submission.status === "draft") ?? playerRows[0] ?? null;
+      const coachRows = data.coachMatrixAssessments.filter(
         (assessment) =>
           assessment.campaign_id === campaignId && assessment.athlete_id === athlete.id,
       );
+      const latestPerCoach = new Map<string, CoachMatrixAssessment>();
+      for (const assessment of latestFirst(coachRows)) {
+        const current = latestPerCoach.get(assessment.coach_profile_id);
+        if (!current || (assessment.status === "draft" && current.status !== "draft")) {
+          latestPerCoach.set(assessment.coach_profile_id, assessment);
+        }
+      }
       return {
         athleteId: athlete.id,
         athleteName: displayName(athlete),
         memberStatus: member.status,
         playerSubmission,
-        coachAssessments,
+        coachAssessments: [...latestPerCoach.values()],
         playerStatus: playerSubmission?.status ?? "not_started",
-        submittedCoachCount: coachAssessments.filter(
-          (assessment) => assessment.status === "submitted",
-        ).length,
+        playerSubmittedCount: playerRows.filter((row) => row.status === "submitted").length,
+        submittedCoachCount: new Set(
+          coachRows
+            .filter((assessment) => assessment.status === "submitted")
+            .map((assessment) => assessment.coach_profile_id),
+        ).size,
       };
     })
     .filter((row): row is CampaignMatrixStatusRow => row !== null);
 }
 
-function buildNpsTasksForAthlete(athlete: Athlete, campaignId?: string): NpsTask[] {
+function buildNpsTasks(
+  raterKind: "player" | "coach",
+  raterProfileId: string,
+  raterAthleteId: string | null,
+  campaignId?: string,
+): NpsTask[] {
   const data = getData();
-  const assignments = data.npsAssignments.filter(
-    (assignment) => assignment.athlete_id === athlete.id,
+  const assignments = data.npsAssignments.filter((assignment) =>
+    raterKind === "player"
+      ? assignment.athlete_id === raterAthleteId
+      : assignment.coach_profile_id === raterProfileId,
   );
   return assignments
-    .map((assignment) => {
+    .map((assignment): NpsTask | null => {
       const survey = data.npsSurveys.find((row) => row.id === assignment.survey_id);
       if (
         !survey ||
@@ -273,23 +330,42 @@ function buildNpsTasksForAthlete(athlete: Athlete, campaignId?: string): NpsTask
       ) {
         return null;
       }
-      const coachIds = data.campaignCoaches
-        .filter((coach) => coach.campaign_id === survey.campaign_id)
-        .map((coach) => coach.coach_profile_id);
+      const targets: NpsTaskTarget[] =
+        raterKind === "player"
+          ? data.campaignCoaches
+              .filter((coach) => coach.campaign_id === survey.campaign_id)
+              .map((coach) => ({
+                id: coach.coach_profile_id,
+                kind: "coach" as const,
+                name: profileName(coach.coach_profile_id),
+                alreadyResponded: data.npsResponses.some(
+                  (response) =>
+                    response.survey_id === survey.id &&
+                    response.rater_profile_id === raterProfileId &&
+                    response.subject_coach_profile_id === coach.coach_profile_id,
+                ),
+              }))
+          : data.campaignMembers
+              .filter((member) => member.campaign_id === survey.campaign_id)
+              .map((member) => {
+                const athlete = findAthlete(member.athlete_id);
+                return {
+                  id: member.athlete_id,
+                  kind: "player" as const,
+                  name: athlete ? displayName(athlete) : "Unknown athlete",
+                  alreadyResponded: data.npsResponses.some(
+                    (response) =>
+                      response.survey_id === survey.id &&
+                      response.rater_profile_id === raterProfileId &&
+                      response.subject_athlete_id === member.athlete_id,
+                  ),
+                };
+              });
       return {
         survey,
         assignmentId: assignment.id,
         status: assignment.status,
-        coaches: coachIds.map((coachProfileId) => ({
-          profileId: coachProfileId,
-          name: profileName(coachProfileId),
-          alreadyResponded: data.npsResponses.some(
-            (response) =>
-              response.survey_id === survey.id &&
-              response.athlete_id === athlete.id &&
-              response.target_coach_profile_id === coachProfileId,
-          ),
-        })),
+        targets,
       };
     })
     .filter((task): task is NpsTask => task !== null);
@@ -305,14 +381,42 @@ export const mockApi: Api = {
   },
 
   async signIn(email: string): Promise<SignInResult> {
-    const profile = getData().profiles.find(
-      (p) => p.email.toLowerCase() === email.trim().toLowerCase(),
+    const data = getData();
+    const normalized = normalizeEmail(email);
+    const profile = data.profiles.find((p) => p.email.toLowerCase() === normalized);
+    if (profile) {
+      setCurrentUserId(profile.id);
+      return { status: "signed_in", profile };
+    }
+    // Closed-roster first login: an admin-created athlete with this email gets
+    // a player profile linked on the spot (mirrors handle_new_user on Supabase).
+    const rosterAthlete = data.athletes.find(
+      (athlete) => !athlete.profile_id && athlete.email?.toLowerCase() === normalized,
     );
-    if (!profile) {
+    if (!rosterAthlete) {
       return { status: "unknown_email" };
     }
-    setCurrentUserId(profile.id);
-    return { status: "signed_in", profile };
+    const timestamp = now();
+    const newProfile = {
+      id: generateId("p"),
+      email: rosterAthlete.email ?? normalized,
+      full_name: rosterAthlete.legal_name,
+      preferred_name: rosterAthlete.preferred_name,
+      role: "player" as const,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    data.profiles.push(newProfile);
+    rosterAthlete.profile_id = newProfile.id;
+    rosterAthlete.updated_at = timestamp;
+    for (const member of data.campaignMembers) {
+      if (member.athlete_id === rosterAthlete.id && member.status === "invited") {
+        member.status = "registered";
+      }
+    }
+    saveData(data);
+    setCurrentUserId(newProfile.id);
+    return { status: "signed_in", profile: newProfile };
   },
 
   async signOut() {
@@ -378,6 +482,58 @@ export const mockApi: Api = {
 
   async listAthletes() {
     return [...getData().athletes];
+  },
+
+  async createAthlete(input: CreateAthleteInput) {
+    const data = getData();
+    const fields = athleteFieldsFromCreateInput(input);
+    if (!fields.email) {
+      throw new Error("Player email is required");
+    }
+    const emailTaken =
+      data.athletes.some((athlete) => athlete.email?.toLowerCase() === fields.email) ||
+      data.profiles.some((profile) => profile.email.toLowerCase() === fields.email);
+    if (emailTaken) {
+      throw new Error("A player or account with this email already exists");
+    }
+    const timestamp = now();
+    const created: Athlete = {
+      id: generateId("a"),
+      profile_id: null,
+      ...fields,
+      phone: null,
+      telegram_handle: null,
+      emergency_contact_name: null,
+      emergency_contact_phone: null,
+      passport_expiry: null,
+      data_sharing_consent: false,
+      media_consent: false,
+      profile_status: "incomplete",
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    data.athletes.push(created);
+    saveData(data);
+    return created;
+  },
+
+  async updateAthleteAsAdmin(athleteId: string, patch: AdminAthletePatch) {
+    const data = getData();
+    const athlete = data.athletes.find((row) => row.id === athleteId);
+    if (!athlete) {
+      throw new Error("Athlete not found");
+    }
+    if (patch.email !== undefined) {
+      const nextEmail = patch.email ? normalizeEmail(patch.email) : null;
+      if (nextEmail !== (athlete.email?.toLowerCase() ?? null) && athlete.profile_id) {
+        throw new Error("Email cannot be changed after the player has logged in");
+      }
+      patch = { ...patch, email: nextEmail };
+    }
+    Object.assign(athlete, patch);
+    athlete.updated_at = now();
+    saveData(data);
+    return athlete;
   },
 
   async getAdminStats(): Promise<AdminStats> {
@@ -505,12 +661,18 @@ export const mockApi: Api = {
       .toSorted((left, right) => right.created_at.localeCompare(left.created_at));
   },
 
-  async getPlayerMatrixSubmission(campaignId: string, athleteId: string) {
-    return (
-      getData().playerMatrixSubmissions.find(
+  async getPlayerMatrixDraft(campaignId: string, athleteId: string) {
+    return findPlayerMatrixDraft(campaignId, athleteId);
+  },
+
+  async listPlayerMatrixSubmissions(campaignId: string, athleteId: string) {
+    return latestFirst(
+      getData().playerMatrixSubmissions.filter(
         (submission) =>
-          submission.campaign_id === campaignId && submission.athlete_id === athleteId,
-      ) ?? null
+          submission.campaign_id === campaignId &&
+          submission.athlete_id === athleteId &&
+          submission.status === "submitted",
+      ),
     );
   },
 
@@ -518,15 +680,12 @@ export const mockApi: Api = {
     assertCampaignMember(input.campaignId, input.athleteId);
     assertOwnAthlete(input.submittedBy, input.athleteId);
     const data = getData();
-    const existing = data.playerMatrixSubmissions.find(
-      (submission) =>
-        (input.id && submission.id === input.id) ||
-        (submission.campaign_id === input.campaignId && submission.athlete_id === input.athleteId),
-    );
-    const eventType = auditEventForSave(existing ?? null, input.status);
-    const next = playerMatrixPayload(input, existing);
-    if (existing) {
-      Object.assign(existing, next);
+    // Saves always target the open draft; submitted rows are immutable history.
+    const draft = findPlayerMatrixDraft(input.campaignId, input.athleteId);
+    const eventType = auditEventForSave(draft, input.status);
+    const next = playerMatrixPayload(input, draft ?? undefined);
+    if (draft) {
+      Object.assign(draft, next);
     } else {
       data.playerMatrixSubmissions.push(next);
     }
@@ -543,14 +702,18 @@ export const mockApi: Api = {
     return next;
   },
 
-  async getCoachMatrixAssessment(campaignId: string, athleteId: string, coachProfileId: string) {
-    return (
-      getData().coachMatrixAssessments.find(
+  async getCoachMatrixDraft(campaignId: string, athleteId: string, coachProfileId: string) {
+    return findCoachMatrixDraft(campaignId, athleteId, coachProfileId);
+  },
+
+  async listCoachMatrixAssessments(campaignId: string, athleteId: string) {
+    return latestFirst(
+      getData().coachMatrixAssessments.filter(
         (assessment) =>
           assessment.campaign_id === campaignId &&
           assessment.athlete_id === athleteId &&
-          assessment.coach_profile_id === coachProfileId,
-      ) ?? null
+          assessment.status === "submitted",
+      ),
     );
   },
 
@@ -558,17 +721,11 @@ export const mockApi: Api = {
     assertCampaignMember(input.campaignId, input.athleteId);
     assertAssignedCoach(input.campaignId, input.coachProfileId);
     const data = getData();
-    const existing = data.coachMatrixAssessments.find(
-      (assessment) =>
-        (input.id && assessment.id === input.id) ||
-        (assessment.campaign_id === input.campaignId &&
-          assessment.athlete_id === input.athleteId &&
-          assessment.coach_profile_id === input.coachProfileId),
-    );
-    const eventType = auditEventForSave(existing ?? null, input.status);
-    const next = coachMatrixPayload(input, existing);
-    if (existing) {
-      Object.assign(existing, next);
+    const draft = findCoachMatrixDraft(input.campaignId, input.athleteId, input.coachProfileId);
+    const eventType = auditEventForSave(draft, input.status);
+    const next = coachMatrixPayload(input, draft ?? undefined);
+    if (draft) {
+      Object.assign(draft, next);
     } else {
       data.coachMatrixAssessments.push(next);
     }
@@ -606,7 +763,8 @@ export const mockApi: Api = {
       status: input.status,
       opens_at: input.opensAt ?? null,
       closes_at: input.closesAt ?? null,
-      min_response_count: input.minResponseCount ?? DEFAULT_NPS_MIN_RESPONSE_COUNT,
+      min_player_rater_count: input.minPlayerRaterCount ?? DEFAULT_NPS_MIN_PLAYER_RATER_COUNT,
+      min_coach_rater_count: input.minCoachRaterCount ?? DEFAULT_NPS_MIN_COACH_RATER_COUNT,
       created_by: existing?.created_by ?? input.createdBy,
       created_at: existing?.created_at ?? timestamp,
       updated_at: timestamp,
@@ -617,6 +775,7 @@ export const mockApi: Api = {
       data.npsSurveys.push(survey);
     }
 
+    // Every roster player rates each coach; every campaign coach rates each player.
     const members = data.campaignMembers.filter(
       (member) => member.campaign_id === input.campaignId,
     );
@@ -629,7 +788,29 @@ export const mockApi: Api = {
         data.npsAssignments.push({
           id: generateId("npsa"),
           survey_id: survey.id,
+          rater_kind: "player",
           athlete_id: member.athlete_id,
+          coach_profile_id: null,
+          status: "pending",
+          completed_at: null,
+          created_at: timestamp,
+        });
+      }
+    }
+    const coaches = data.campaignCoaches.filter((coach) => coach.campaign_id === input.campaignId);
+    for (const coach of coaches) {
+      const alreadyAssigned = data.npsAssignments.some(
+        (assignment) =>
+          assignment.survey_id === survey.id &&
+          assignment.coach_profile_id === coach.coach_profile_id,
+      );
+      if (!alreadyAssigned) {
+        data.npsAssignments.push({
+          id: generateId("npsa"),
+          survey_id: survey.id,
+          rater_kind: "coach",
+          athlete_id: null,
+          coach_profile_id: coach.coach_profile_id,
           status: "pending",
           completed_at: null,
           created_at: timestamp,
@@ -643,37 +824,44 @@ export const mockApi: Api = {
 
   async listPlayerNpsTasks(profileId: string, campaignId?: string) {
     const athlete = getData().athletes.find((row) => row.profile_id === profileId);
-    return athlete ? buildNpsTasksForAthlete(athlete, campaignId) : [];
+    return athlete ? buildNpsTasks("player", profileId, athlete.id, campaignId) : [];
+  },
+
+  async listCoachNpsTasks(coachProfileId: string, campaignId?: string) {
+    return buildNpsTasks("coach", coachProfileId, null, campaignId);
   },
 
   async submitNpsResponse(input: NpsResponseInput) {
     if (input.score < 0 || input.score > 10) {
       throw new Error("NPS score must be between 0 and 10");
     }
+    if (!input.subjectCoachProfileId === !input.subjectAthleteId) {
+      throw new Error("NPS response needs exactly one subject");
+    }
     const data = getData();
     const assignment = data.npsAssignments.find(
-      (row) =>
-        row.id === input.assignmentId &&
-        row.survey_id === input.surveyId &&
-        row.athlete_id === input.athleteId,
+      (row) => row.id === input.assignmentId && row.survey_id === input.surveyId,
     );
     const survey = data.npsSurveys.find((row) => row.id === input.surveyId);
     if (!assignment || !survey || survey.status !== "open") {
-      throw new Error("NPS survey is not open for this player");
+      throw new Error("NPS survey is not open for this rater");
     }
     const existing = data.npsResponses.find(
       (response) =>
         response.survey_id === input.surveyId &&
-        response.athlete_id === input.athleteId &&
-        response.target_coach_profile_id === input.targetCoachProfileId,
+        response.rater_profile_id === input.raterProfileId &&
+        (input.subjectCoachProfileId
+          ? response.subject_coach_profile_id === input.subjectCoachProfileId
+          : response.subject_athlete_id === input.subjectAthleteId),
     );
     const timestamp = now();
     const response = {
       id: existing?.id ?? generateId("npsr"),
       survey_id: input.surveyId,
       assignment_id: input.assignmentId,
-      athlete_id: input.athleteId,
-      target_coach_profile_id: input.targetCoachProfileId,
+      rater_profile_id: input.raterProfileId,
+      subject_athlete_id: input.subjectAthleteId ?? null,
+      subject_coach_profile_id: input.subjectCoachProfileId ?? null,
       score: input.score,
       comment: input.comment ?? null,
       created_at: existing?.created_at ?? timestamp,
@@ -685,47 +873,66 @@ export const mockApi: Api = {
       data.npsResponses.push(response);
     }
 
-    const coachCount = data.campaignCoaches.filter(
-      (coach) => coach.campaign_id === survey.campaign_id,
-    ).length;
+    const targetCount =
+      assignment.rater_kind === "player"
+        ? data.campaignCoaches.filter((coach) => coach.campaign_id === survey.campaign_id).length
+        : data.campaignMembers.filter((member) => member.campaign_id === survey.campaign_id).length;
     const responseCount = data.npsResponses.filter(
-      (row) => row.survey_id === survey.id && row.athlete_id === input.athleteId,
+      (row) => row.survey_id === survey.id && row.rater_profile_id === input.raterProfileId,
     ).length;
-    if (coachCount > 0 && responseCount >= coachCount) {
+    if (targetCount > 0 && responseCount >= targetCount) {
       assignment.status = "completed";
       assignment.completed_at = timestamp;
     }
     saveData(data);
   },
 
-  async getNpsReport(campaignId: string): Promise<NpsCoachReportRow[]> {
+  async getNpsReport(campaignId: string): Promise<NpsReport> {
     const data = getData();
     const surveys = data.npsSurveys.filter((survey) => survey.campaign_id === campaignId);
     const coaches = data.campaignCoaches.filter((coach) => coach.campaign_id === campaignId);
-    return surveys.flatMap((survey) =>
+    const members = data.campaignMembers.filter((member) => member.campaign_id === campaignId);
+    const coachRows = surveys.flatMap((survey) =>
       coaches.map((coach) => {
         const responses = data.npsResponses.filter(
           (response) =>
             response.survey_id === survey.id &&
-            response.target_coach_profile_id === coach.coach_profile_id,
+            response.subject_coach_profile_id === coach.coach_profile_id,
         );
-        const aggregate = aggregateNps(responses, survey.min_response_count);
-        return {
-          surveyId: survey.id,
-          surveyTitle: survey.title,
-          surveyWindow: survey.survey_window,
-          coachProfileId: coach.coach_profile_id,
-          coachName: profileName(coach.coach_profile_id),
-          responseCount: aggregate.responseCount,
-          averageScore: aggregate.averageScore,
-          nps: aggregate.nps,
-          promoterCount: aggregate.promoterCount,
-          passiveCount: aggregate.passiveCount,
-          detractorCount: aggregate.detractorCount,
-          withheld: aggregate.withheld,
-        };
+        const aggregate = aggregateNps(responses, survey.min_player_rater_count);
+        return Object.assign(
+          {
+            surveyId: survey.id,
+            surveyTitle: survey.title,
+            surveyWindow: survey.survey_window,
+            coachProfileId: coach.coach_profile_id,
+            coachName: profileName(coach.coach_profile_id),
+          },
+          aggregate,
+        );
       }),
     );
+    const playerRows = surveys.flatMap((survey) =>
+      members.map((member) => {
+        const athlete = findAthlete(member.athlete_id);
+        const responses = data.npsResponses.filter(
+          (response) =>
+            response.survey_id === survey.id && response.subject_athlete_id === member.athlete_id,
+        );
+        const aggregate = aggregateNps(responses, survey.min_coach_rater_count);
+        return Object.assign(
+          {
+            surveyId: survey.id,
+            surveyTitle: survey.title,
+            surveyWindow: survey.survey_window,
+            athleteId: member.athlete_id,
+            athleteName: athlete ? displayName(athlete) : "Unknown athlete",
+          },
+          aggregate,
+        );
+      }),
+    );
+    return { coachRows, playerRows };
   },
 
   async listChangeRequests(): Promise<ChangeRequestView[]> {
@@ -975,6 +1182,9 @@ export const mockApi: Api = {
           legal_name: a.legal_name,
           preferred_name: a.preferred_name,
           phone: a.phone,
+          gender: a.gender,
+          positions: a.positions,
+          date_of_birth: a.date_of_birth,
           profile_status: a.profile_status,
           created_at: a.created_at,
           updated_at: a.updated_at,

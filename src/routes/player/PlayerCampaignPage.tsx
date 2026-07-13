@@ -7,7 +7,12 @@ import { api } from "../../data";
 import type { NpsTask, PlayerCampaignFlow } from "../../data/types";
 import { campaignCapabilities, hasAnyCampaignFeature } from "../../lib/campaignCapabilities";
 import { optionalText } from "../../lib/form";
-import type { Athlete, MatrixSubmissionStatus, PlayerMatrixSubmission } from "../../types/database";
+import type {
+  Athlete,
+  CoachMatrixAssessment,
+  MatrixSubmissionStatus,
+  PlayerMatrixSubmission,
+} from "../../types/database";
 import {
   GrowthMatrixExplainer,
   GrowthReviewSummary,
@@ -21,13 +26,24 @@ import {
   type PlayerMatrixFormState,
 } from "./playerMatrixForm";
 
+function formatDate(value: string | null): string {
+  return value ? new Date(value).toLocaleDateString() : "-";
+}
+
+function scoreSummary(scores: (number | null)[]): string {
+  return scores.map((score) => score ?? "-").join(" / ");
+}
+
 export function PlayerCampaignPage() {
   const { campaignId = "" } = useParams();
   const { profile } = useAuth();
   const [flow, setFlow] = useState<PlayerCampaignFlow | null>(null);
   const [athlete, setAthlete] = useState<Athlete | null>(null);
-  const [matrixSubmission, setMatrixSubmission] = useState<PlayerMatrixSubmission | null>(null);
+  const [matrixDraft, setMatrixDraft] = useState<PlayerMatrixSubmission | null>(null);
+  const [matrixHistory, setMatrixHistory] = useState<PlayerMatrixSubmission[]>([]);
+  const [coachEvaluations, setCoachEvaluations] = useState<CoachMatrixAssessment[]>([]);
   const [matrixForm, setMatrixForm] = useState<PlayerMatrixFormState>(emptyPlayerMatrixForm);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [npsTasks, setNpsTasks] = useState<NpsTask[]>([]);
   const [npsScores, setNpsScores] = useState<Record<string, string>>({});
   const [npsComments, setNpsComments] = useState<Record<string, string>>({});
@@ -52,11 +68,22 @@ export function PlayerCampaignPage() {
     setAthlete(nextAthlete);
     setNpsTasks(nextNpsTasks);
     if (nextAthlete && nextCaps.liveMatrix) {
-      const nextSubmission = await api.getPlayerMatrixSubmission(campaignId, nextAthlete.id);
-      setMatrixSubmission(nextSubmission);
-      setMatrixForm(playerMatrixFormFromSubmission(nextSubmission));
+      const [nextDraft, nextHistory, nextCoachEvaluations] = await Promise.all([
+        api.getPlayerMatrixDraft(campaignId, nextAthlete.id),
+        api.listPlayerMatrixSubmissions(campaignId, nextAthlete.id),
+        api.listCoachMatrixAssessments(campaignId, nextAthlete.id),
+      ]);
+      setMatrixDraft(nextDraft);
+      setMatrixHistory(nextHistory);
+      setCoachEvaluations(nextCoachEvaluations);
+      // Resume an open draft, or start fresh when there is no history yet.
+      setEditorOpen(nextDraft !== null || nextHistory.length === 0);
+      setMatrixForm(playerMatrixFormFromSubmission(nextDraft));
     } else {
-      setMatrixSubmission(null);
+      setMatrixDraft(null);
+      setMatrixHistory([]);
+      setCoachEvaluations([]);
+      setEditorOpen(false);
       setMatrixForm(emptyPlayerMatrixForm);
     }
     setLoading(false);
@@ -80,26 +107,35 @@ export function PlayerCampaignPage() {
     setMatrixForm((current) => ({ ...current, [field]: value }));
   }
 
+  function startNewEvaluation() {
+    // Prefill from the latest submitted entry so players adjust, not retype.
+    setMatrixForm(playerMatrixFormFromSubmission(matrixHistory[0] ?? null));
+    setEditorOpen(true);
+    setMessage(null);
+  }
+
   async function saveMatrix(status: MatrixSubmissionStatus) {
     if (!profile || !athlete) {
       return;
     }
-    const saved = await api.savePlayerMatrixSubmission(
+    await api.savePlayerMatrixSubmission(
       playerMatrixInputFromForm(matrixForm, {
-        id: matrixSubmission?.id,
         campaignId,
         athleteId: athlete.id,
         submittedBy: profile.id,
         status,
       }),
     );
-    setMatrixSubmission(saved);
-    setMatrixForm(playerMatrixFormFromSubmission(saved));
-    setMessage(status === "submitted" ? "Self-evaluation submitted." : "Self-evaluation saved.");
+    setMessage(
+      status === "submitted"
+        ? "Self-evaluation submitted. It is now a permanent entry in your progress log."
+        : "Draft saved. You can keep editing until you submit.",
+    );
+    await load();
   }
 
   async function submitNps(task: NpsTask, coachProfileId: string) {
-    if (!athlete) {
+    if (!profile) {
       return;
     }
     const key = `${task.survey.id}:${coachProfileId}`;
@@ -111,8 +147,8 @@ export function PlayerCampaignPage() {
     await api.submitNpsResponse({
       surveyId: task.survey.id,
       assignmentId: task.assignmentId,
-      athleteId: athlete.id,
-      targetCoachProfileId: coachProfileId,
+      raterProfileId: profile.id,
+      subjectCoachProfileId: coachProfileId,
       score,
       comment: optionalText(npsComments[key]),
     });
@@ -175,63 +211,160 @@ export function PlayerCampaignPage() {
       {showCampaignMatrix ? (
         <section className="card stack">
           <div className="section-title">
-            <h2>Live self-evaluation matrix</h2>
-            <Badge tone={matrixSubmission?.status === "submitted" ? "ok" : "warn"}>
-              {matrixSubmission?.status ?? "not started"}
+            <h2>Self-evaluation</h2>
+            <Badge tone={matrixDraft ? "warn" : matrixHistory.length > 0 ? "ok" : "warn"}>
+              {matrixDraft
+                ? "draft in progress"
+                : matrixHistory.length > 0
+                  ? `${matrixHistory.length} submitted`
+                  : "not started"}
             </Badge>
           </div>
-          <div className="grid cols-4">
-            <RatingField
-              label="Current skill"
-              value={matrixForm.skillScore}
-              onChange={(value) => updateMatrixForm("skillScore", value)}
-            />
-            <RatingField
-              label="Growth potential"
-              value={matrixForm.growthScore}
-              onChange={(value) => updateMatrixForm("growthScore", value)}
-            />
-            <RatingField
-              label="Competition readiness"
-              value={matrixForm.readinessScore}
-              onChange={(value) => updateMatrixForm("readinessScore", value)}
-            />
-            <RatingField
-              label="Confidence"
-              value={matrixForm.confidenceScore}
-              onChange={(value) => updateMatrixForm("confidenceScore", value)}
-            />
+          {editorOpen ? (
+            <>
+              <div className="grid cols-4">
+                <RatingField
+                  label="Current skill"
+                  value={matrixForm.skillScore}
+                  onChange={(value) => updateMatrixForm("skillScore", value)}
+                />
+                <RatingField
+                  label="Growth potential"
+                  value={matrixForm.growthScore}
+                  onChange={(value) => updateMatrixForm("growthScore", value)}
+                />
+                <RatingField
+                  label="Competition readiness"
+                  value={matrixForm.readinessScore}
+                  onChange={(value) => updateMatrixForm("readinessScore", value)}
+                />
+                <RatingField
+                  label="Confidence"
+                  value={matrixForm.confidenceScore}
+                  onChange={(value) => updateMatrixForm("confidenceScore", value)}
+                />
+              </div>
+              <TextAreaField
+                label="Strengths"
+                value={matrixForm.strengths}
+                onChange={(value) => updateMatrixForm("strengths", value)}
+              />
+              <TextAreaField
+                label="Development focus"
+                value={matrixForm.developmentFocus}
+                onChange={(value) => updateMatrixForm("developmentFocus", value)}
+              />
+              <TextAreaField
+                label="Support needed"
+                value={matrixForm.supportNeeded}
+                onChange={(value) => updateMatrixForm("supportNeeded", value)}
+              />
+              <div className="btn-row">
+                <button type="button" className="btn" onClick={() => void saveMatrix("draft")}>
+                  Save draft
+                </button>
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() => void saveMatrix("submitted")}
+                >
+                  Submit self-evaluation
+                </button>
+              </div>
+              <p className="muted">
+                Submitted evaluations cannot be edited afterwards; they form your progress log
+                across the campaign. Coaches can see them as context.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="muted">
+                Your last self-evaluation was submitted on{" "}
+                {formatDate(matrixHistory[0]?.submitted_at ?? null)}. Submit a new one whenever your
+                training picture changes.
+              </p>
+              <div className="btn-row">
+                <button type="button" className="btn primary" onClick={startNewEvaluation}>
+                  Start new self-evaluation
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      ) : null}
+      {showCampaignMatrix && matrixHistory.length > 0 ? (
+        <section className="card stack">
+          <div className="section-title">
+            <h2>Your self-evaluation history</h2>
+            <Badge>{matrixHistory.length} entries</Badge>
           </div>
-          <TextAreaField
-            label="Strengths"
-            value={matrixForm.strengths}
-            onChange={(value) => updateMatrixForm("strengths", value)}
-          />
-          <TextAreaField
-            label="Development focus"
-            value={matrixForm.developmentFocus}
-            onChange={(value) => updateMatrixForm("developmentFocus", value)}
-          />
-          <TextAreaField
-            label="Support needed"
-            value={matrixForm.supportNeeded}
-            onChange={(value) => updateMatrixForm("supportNeeded", value)}
-          />
-          <div className="btn-row">
-            <button type="button" className="btn" onClick={() => void saveMatrix("draft")}>
-              Save self-evaluation
-            </button>
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => void saveMatrix("submitted")}
-            >
-              Submit self-evaluation
-            </button>
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Submitted</th>
+                  <th>Skill / Growth / Readiness / Confidence</th>
+                  <th>Development focus</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matrixHistory.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{formatDate(entry.submitted_at)}</td>
+                    <td>
+                      {scoreSummary([
+                        entry.skill_score,
+                        entry.growth_score,
+                        entry.readiness_score,
+                        entry.confidence_score,
+                      ])}
+                    </td>
+                    <td>{entry.development_focus ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+      {showCampaignMatrix && coachEvaluations.length > 0 ? (
+        <section className="card stack">
+          <div className="section-title">
+            <h2>Coach evaluations of you</h2>
+            <Badge>{coachEvaluations.length} entries</Badge>
           </div>
           <p className="muted">
-            Coaches can use this as context, but coach assessments remain separate and audited.
+            Only evaluations about you are visible here. Other players cannot see them.
           </p>
+          <div className="table-wrap">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Submitted</th>
+                  <th>Skill / Growth / Readiness / Tactical</th>
+                  <th>Strengths</th>
+                  <th>Development focus</th>
+                </tr>
+              </thead>
+              <tbody>
+                {coachEvaluations.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{formatDate(entry.submitted_at)}</td>
+                    <td>
+                      {scoreSummary([
+                        entry.skill_score,
+                        entry.growth_score,
+                        entry.readiness_score,
+                        entry.tactical_score,
+                      ])}
+                    </td>
+                    <td>{entry.strengths ?? "-"}</td>
+                    <td>{entry.development_focus ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
       {showCampaignNps && npsTasks.length > 0 ? (
@@ -247,14 +380,14 @@ export function PlayerCampaignPage() {
                 Scores are reported only in anonymous aggregate views once the response threshold is
                 met.
               </p>
-              {task.coaches.map((coach) => {
-                const key = `${task.survey.id}:${coach.profileId}`;
+              {task.targets.map((target) => {
+                const key = `${task.survey.id}:${target.id}`;
                 return (
-                  <div className="nps-coach-row" key={coach.profileId}>
+                  <div className="nps-coach-row" key={target.id}>
                     <div>
-                      <strong>{coach.name}</strong>
+                      <strong>{target.name}</strong>
                       <p className="muted">
-                        {coach.alreadyResponded ? "Response received" : "Score 0-10"}
+                        {target.alreadyResponded ? "Response received" : "Score 0-10"}
                       </p>
                     </div>
                     <div className="field compact-field">
@@ -265,7 +398,7 @@ export function PlayerCampaignPage() {
                         onChange={(event) =>
                           setNpsScores((current) => ({ ...current, [key]: event.target.value }))
                         }
-                        disabled={coach.alreadyResponded}
+                        disabled={target.alreadyResponded}
                       >
                         <option value="">-</option>
                         {Array.from({ length: 11 }, (_, score) => (
@@ -276,7 +409,7 @@ export function PlayerCampaignPage() {
                       </select>
                     </div>
                     <TextField
-                      label={`NPS comment ${coach.name}`}
+                      label={`NPS comment ${target.name}`}
                       value={npsComments[key] ?? ""}
                       onChange={(value) =>
                         setNpsComments((current) => ({ ...current, [key]: value }))
@@ -286,8 +419,8 @@ export function PlayerCampaignPage() {
                     <button
                       type="button"
                       className="btn sm"
-                      disabled={coach.alreadyResponded}
-                      onClick={() => void submitNps(task, coach.profileId)}
+                      disabled={target.alreadyResponded}
+                      onClick={() => void submitNps(task, target.id)}
                     >
                       Submit NPS
                     </button>

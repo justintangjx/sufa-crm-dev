@@ -11,6 +11,9 @@ export function makeAthlete(overrides: Partial<Athlete> = {}): Athlete {
   return {
     id: nextId("athlete"),
     profile_id: nextId("profile"),
+    email: "jordan@example.com",
+    gender: "male",
+    positions: ["handler"],
     legal_name: "Jordan Tan",
     preferred_name: "Jordan",
     date_of_birth: "1998-04-12",

@@ -57,6 +57,8 @@ export const SEED_EMAILS = {
   ben: "ben@sufa.test",
   cara: "cara@sufa.test",
   derrick: "derrick@sufa.test",
+  // Roster-only player: added by admin, has never logged in.
+  elle: "elle@sufa.test",
 } as const;
 
 function profile(id: string, email: string, role: Profile["role"], name: string): Profile {
@@ -71,8 +73,12 @@ function profile(id: string, email: string, role: Profile["role"], name: string)
   };
 }
 
-function athlete(over: Partial<Athlete> & { id: string; profile_id: string }): Athlete {
+function athlete(over: Partial<Athlete> & { id: string }): Athlete {
   return {
+    profile_id: null,
+    email: null,
+    gender: null,
+    positions: [],
     legal_name: null,
     preferred_name: null,
     date_of_birth: null,
@@ -106,6 +112,9 @@ export function buildSeed(): MockData {
     athlete({
       id: "a-alice",
       profile_id: "p-alice",
+      email: SEED_EMAILS.alice,
+      gender: "female",
+      positions: ["handler"],
       legal_name: "Alice Wong",
       preferred_name: "Alice",
       date_of_birth: "1997-03-02",
@@ -120,6 +129,9 @@ export function buildSeed(): MockData {
     athlete({
       id: "a-ben",
       profile_id: "p-ben",
+      email: SEED_EMAILS.ben,
+      gender: "male",
+      positions: ["cutter"],
       legal_name: "Ben Ong",
       preferred_name: "Ben",
       phone: "+65 9000 0002",
@@ -128,6 +140,9 @@ export function buildSeed(): MockData {
     athlete({
       id: "a-cara",
       profile_id: "p-cara",
+      email: SEED_EMAILS.cara,
+      gender: "female",
+      positions: ["hybrid", "cutter"],
       legal_name: "Cara Lee",
       preferred_name: "Cara",
       date_of_birth: "1999-11-20",
@@ -141,6 +156,19 @@ export function buildSeed(): MockData {
     athlete({
       id: "a-derrick",
       profile_id: "p-derrick",
+      email: SEED_EMAILS.derrick,
+      gender: "male",
+      profile_status: "incomplete",
+    }),
+    // Admin-created roster player who has not logged in yet (login status: invited).
+    athlete({
+      id: "a-elle",
+      email: SEED_EMAILS.elle,
+      gender: "female",
+      positions: ["handler"],
+      legal_name: "Elle Ng",
+      preferred_name: "Elle",
+      date_of_birth: "2003-05-14",
       profile_status: "incomplete",
     }),
   ];
@@ -207,6 +235,13 @@ export function buildSeed(): MockData {
       campaign_id: "c-u24",
       athlete_id: "a-cara",
       status: "selected",
+      created_at: TS,
+    },
+    {
+      id: "m-u24-4",
+      campaign_id: "c-u24",
+      athlete_id: "a-elle",
+      status: "invited",
       created_at: TS,
     },
   ];
@@ -358,8 +393,26 @@ export function buildSeed(): MockData {
   const growthReplies: PlayerGrowthReply[] = [];
 
   const playerMatrixSubmissions: PlayerMatrixSubmission[] = [
+    // Two submitted entries so the self-evaluation timeline renders in demos.
     {
-      id: "pms-alice-u24",
+      id: "pms-alice-u24-1",
+      campaign_id: "c-u24",
+      athlete_id: "a-alice",
+      submitted_by: "p-alice",
+      skill_score: 3,
+      growth_score: 4,
+      readiness_score: 3,
+      confidence_score: 3,
+      strengths: "Consistent resets and willingness to mark up on faster cutters.",
+      development_focus: "Build throwing confidence into the wind.",
+      support_needed: "Video review of my defensive positioning.",
+      status: "submitted",
+      submitted_at: "2026-01-20T00:00:00.000Z",
+      created_at: TS,
+      updated_at: "2026-01-20T00:00:00.000Z",
+    },
+    {
+      id: "pms-alice-u24-2",
       campaign_id: "c-u24",
       athlete_id: "a-alice",
       submitted_by: "p-alice",
@@ -406,7 +459,7 @@ export function buildSeed(): MockData {
       actor_role: "player",
       event_type: "submitted",
       entity_type: "player_matrix_submission",
-      entity_id: "pms-alice-u24",
+      entity_id: "pms-alice-u24-2",
       metadata: { source: "seed" },
       created_at: "2026-02-10T00:00:00.000Z",
     },
@@ -428,12 +481,13 @@ export function buildSeed(): MockData {
     {
       id: "nps-u24-mid",
       campaign_id: "c-u24",
-      title: "U24 Worlds mid-season coach NPS",
+      title: "U24 Worlds mid-season NPS",
       survey_window: "mid_season",
       status: "open",
       opens_at: "2026-04-01T00:00:00.000Z",
       closes_at: "2026-04-15T00:00:00.000Z",
-      min_response_count: 3,
+      min_player_rater_count: 3,
+      min_coach_rater_count: 2,
       created_by: "p-admin",
       created_at: TS,
       updated_at: TS,
@@ -441,12 +495,13 @@ export function buildSeed(): MockData {
     {
       id: "nps-u24-post",
       campaign_id: "c-u24",
-      title: "U24 Worlds post-season coach NPS",
+      title: "U24 Worlds post-season NPS",
       survey_window: "post_season",
       status: "draft",
       opens_at: null,
       closes_at: null,
-      min_response_count: 3,
+      min_player_rater_count: 3,
+      min_coach_rater_count: 2,
       created_by: "p-admin",
       created_at: TS,
       updated_at: TS,
@@ -457,7 +512,9 @@ export function buildSeed(): MockData {
     {
       id: "npsa-u24-mid-alice",
       survey_id: "nps-u24-mid",
+      rater_kind: "player",
       athlete_id: "a-alice",
+      coach_profile_id: null,
       status: "pending",
       completed_at: null,
       created_at: TS,
@@ -465,7 +522,9 @@ export function buildSeed(): MockData {
     {
       id: "npsa-u24-mid-ben",
       survey_id: "nps-u24-mid",
+      rater_kind: "player",
       athlete_id: "a-ben",
+      coach_profile_id: null,
       status: "pending",
       completed_at: null,
       created_at: TS,
@@ -473,7 +532,39 @@ export function buildSeed(): MockData {
     {
       id: "npsa-u24-mid-cara",
       survey_id: "nps-u24-mid",
+      rater_kind: "player",
       athlete_id: "a-cara",
+      coach_profile_id: null,
+      status: "pending",
+      completed_at: null,
+      created_at: TS,
+    },
+    {
+      id: "npsa-u24-mid-elle",
+      survey_id: "nps-u24-mid",
+      rater_kind: "player",
+      athlete_id: "a-elle",
+      coach_profile_id: null,
+      status: "pending",
+      completed_at: null,
+      created_at: TS,
+    },
+    {
+      id: "npsa-u24-mid-coach",
+      survey_id: "nps-u24-mid",
+      rater_kind: "coach",
+      athlete_id: null,
+      coach_profile_id: "p-coach",
+      status: "pending",
+      completed_at: null,
+      created_at: TS,
+    },
+    {
+      id: "npsa-u24-mid-coach2",
+      survey_id: "nps-u24-mid",
+      rater_kind: "coach",
+      athlete_id: null,
+      coach_profile_id: "p-coach-2",
       status: "pending",
       completed_at: null,
       created_at: TS,
