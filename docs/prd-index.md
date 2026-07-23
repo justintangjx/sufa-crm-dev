@@ -1,6 +1,6 @@
-# PRD Section Index
+# PRD section index
 
-Canonical spec: [`prd.md`](../prd.md). Read **sections**, not the whole file, unless scope is new.
+Canonical spec: [`prd.md`](../prd.md). Read sections, not the whole file, unless scope is new.
 
 | Task                  | prd.md sections              |
 | --------------------- | ---------------------------- |
@@ -32,4 +32,4 @@ Canonical spec: [`prd.md`](../prd.md). Read **sections**, not the whole file, un
 - §14 Non-goals
 - §15 Security notes
 
-Sections §9, §16–26 are tooling, prompts, and association material — skip unless relevant.
+Sections §9 and §16–26 are tooling, prompts, and association material. Skip unless you need them.

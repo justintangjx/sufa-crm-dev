@@ -4,11 +4,22 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { api, resetData } from "./data";
 import { TestApp } from "./routes";
 
+async function openU24PostNps() {
+  await api.saveNpsSurvey({
+    campaignId: "c-u24",
+    title: "U24 Worlds post-season NPS",
+    window: "post_season",
+    status: "open",
+    opensAt: new Date().toISOString(),
+    createdBy: "p-admin",
+  });
+}
+
 async function submitNpsFor(profileId: string, score: number) {
   const task = (await api.listPlayerNpsTasks(profileId, "c-u24"))[0];
   expect(task).toBeDefined();
   await api.submitNpsResponse({
-    surveyId: "nps-u24-mid",
+    surveyId: task?.survey.id ?? "nps-u24-post",
     assignmentId: task?.assignmentId ?? "",
     raterProfileId: profileId,
     subjectCoachProfileId: "p-coach",
@@ -257,6 +268,47 @@ describe("App routing", () => {
     expect(flow?.memberStatus).toBe("registered");
   });
 
+  it("lets an admin create and assign a coach on campaign detail", async () => {
+    const user = userEvent.setup();
+    await api.signIn("admin@sufa.test");
+
+    render(<TestApp initialEntries={["/admin/campaigns/c-u24"]} />);
+
+    expect(await screen.findByRole("heading", { name: /u24 worlds 2026/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /assign coaches/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /player growth matrix/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open end-of-campaign nps/i })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/new coach name/i), "Coach Ng");
+    await user.type(screen.getByLabelText(/coach login email/i), "coach.ng@sufa.test");
+    await user.click(screen.getByRole("button", { name: /add and assign coach/i }));
+
+    expect(await screen.findByText(/Coach Ng created and assigned/i)).toBeInTheDocument();
+    const coaches = await api.listCampaignCoaches("c-u24");
+    expect(coaches.some((coach) => coach.email === "coach.ng@sufa.test")).toBe(true);
+  });
+
+  it("commits a campaign roster CSV plan for new and existing athletes", async () => {
+    const { parseRosterCsv } = await import("./lib/rosterImport");
+    const parsed = parseRosterCsv(
+      ["email,legal_name", "derrick@sufa.test,Derrick", "fresh.import@sufa.test,Fresh Import"].join(
+        "\n",
+      ),
+    );
+    expect(parsed.headerError).toBeNull();
+    const result = await api.commitCampaignRosterImport({
+      campaignId: "c-u24",
+      rows: parsed.rows,
+    });
+    expect(result.createdAthletes).toBe(1);
+    expect(result.assignedMembers).toBe(2);
+    const readiness = await api.getCampaignReadiness("c-u24");
+    expect(readiness.some((row) => row.name.includes("Fresh"))).toBe(true);
+    expect(readiness.some((row) => row.athleteId === "a-derrick")).toBe(true);
+  });
+
   it("lets an admin triage review queue risk without auto-approving changes", async () => {
     const user = userEvent.setup();
     await api.updateOwnAthlete("p-cara", { passport_expiry: "2031-03-01" });
@@ -334,7 +386,7 @@ describe("App routing", () => {
     const rows = await api.getCampaignMatrixStatus("c-u24");
     const ben = rows.find((row) => row.athleteId === "a-ben");
     expect(ben?.playerStatus).toBe("submitted");
-    expect(ben?.submittedCoachCount).toBe(1);
+    expect(ben?.distinctSubmittedCoachCount).toBe(1);
 
     const auditEvents = await api.listEvaluationAuditEvents("c-u24");
     expect(auditEvents.map((event) => event.event_type)).toEqual(
@@ -344,21 +396,22 @@ describe("App routing", () => {
   });
 
   it("withholds NPS aggregates until the anonymity threshold is met", async () => {
+    await openU24PostNps();
     let report = await api.getNpsReport("c-u24");
-    const coachLimMid = () =>
+    const coachLimPost = () =>
       report.coachRows.find(
-        (row) => row.surveyId === "nps-u24-mid" && row.coachProfileId === "p-coach",
+        (row) => row.surveyId === "nps-u24-post" && row.coachProfileId === "p-coach",
       );
-    expect(coachLimMid()?.withheld).toBe(true);
+    expect(coachLimPost()?.withheld).toBe(true);
 
     await submitNpsFor("p-alice", 10);
     await submitNpsFor("p-ben", 9);
     report = await api.getNpsReport("c-u24");
-    expect(coachLimMid()?.withheld).toBe(true);
+    expect(coachLimPost()?.withheld).toBe(true);
 
     await submitNpsFor("p-cara", 6);
     report = await api.getNpsReport("c-u24");
-    expect(coachLimMid()).toMatchObject({
+    expect(coachLimPost()).toMatchObject({
       responseCount: 3,
       withheld: false,
       nps: 33,
@@ -366,34 +419,35 @@ describe("App routing", () => {
   });
 
   it("applies the lower coach-rater threshold for coach-rates-player aggregates", async () => {
+    await openU24PostNps();
     const coachTask = (await api.listCoachNpsTasks("p-coach", "c-u24"))[0];
     expect(coachTask).toBeDefined();
     expect(coachTask?.targets.every((target) => target.kind === "player")).toBe(true);
 
     await api.submitNpsResponse({
-      surveyId: "nps-u24-mid",
+      surveyId: coachTask?.survey.id ?? "nps-u24-post",
       assignmentId: coachTask?.assignmentId ?? "",
       raterProfileId: "p-coach",
       subjectAthleteId: "a-alice",
       score: 9,
     });
     let report = await api.getNpsReport("c-u24");
-    const aliceMid = () =>
+    const alicePost = () =>
       report.playerRows.find(
-        (row) => row.surveyId === "nps-u24-mid" && row.athleteId === "a-alice",
+        (row) => row.surveyId === "nps-u24-post" && row.athleteId === "a-alice",
       );
-    expect(aliceMid()?.withheld).toBe(true);
+    expect(alicePost()?.withheld).toBe(true);
 
     const coach2Task = (await api.listCoachNpsTasks("p-coach-2", "c-u24"))[0];
     await api.submitNpsResponse({
-      surveyId: "nps-u24-mid",
+      surveyId: coach2Task?.survey.id ?? "nps-u24-post",
       assignmentId: coach2Task?.assignmentId ?? "",
       raterProfileId: "p-coach-2",
       subjectAthleteId: "a-alice",
       score: 7,
     });
     report = await api.getNpsReport("c-u24");
-    expect(aliceMid()).toMatchObject({
+    expect(alicePost()).toMatchObject({
       responseCount: 2,
       withheld: false,
     });

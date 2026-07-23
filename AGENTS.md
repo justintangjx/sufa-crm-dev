@@ -9,14 +9,15 @@ Read before coding. Full doc index: [`docs/README.md`](docs/README.md).
 
 ## Tier 1 — read when the task needs it
 
-| Task                       | Read                                                             |
-| -------------------------- | ---------------------------------------------------------------- |
-| Product behaviour / schema | [`prd.md`](prd.md) via [`docs/prd-index.md`](docs/prd-index.md)  |
-| Campaign / matrix / NPS    | [`docs/domains/campaign.md`](docs/domains/campaign.md)           |
-| Structural refactor        | [`docs/cleanup-refactor-plan.md`](docs/cleanup-refactor-plan.md) |
-| Coach LLM                  | [`docs/coach-llm.md`](docs/coach-llm.md)                         |
-| Commands                   | [`docs/tooling.md`](docs/tooling.md)                             |
-| Multi-agent work           | [`docs/agent-orchestration.md`](docs/agent-orchestration.md)     |
+| Task                       | Read                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------- |
+| Deploy / flag go-no-go     | [`docs/harness.md`](docs/harness.md) + [`harness/manifest.json`](harness/manifest.json) |
+| Product behaviour / schema | [`prd.md`](prd.md) via [`docs/prd-index.md`](docs/prd-index.md)                         |
+| Campaign / matrix / NPS    | [`docs/domains/campaign.md`](docs/domains/campaign.md)                                  |
+| Structural refactor        | [`docs/cleanup-refactor-plan.md`](docs/cleanup-refactor-plan.md)                        |
+| Coach LLM                  | [`docs/coach-llm.md`](docs/coach-llm.md)                                                |
+| Commands                   | [`docs/tooling.md`](docs/tooling.md)                                                    |
+| Multi-agent work           | [`docs/agent-orchestration.md`](docs/agent-orchestration.md)                            |
 
 Do not read `prd.md` cover-to-cover for small fixes. Do not read future-plan docs unless implementing that feature.
 
@@ -33,6 +34,9 @@ Do not read `prd.md` cover-to-cover for small fixes. Do not read future-plan doc
 - Small, focused changes. Match surrounding code. No narration comments.
 - Ask before major dependencies (`pnpm add`).
 - Feature flags: `VITE_*` in `.env.example`, production-default-off, documented in `state.md`.
+  Enabling or shipping a flag requires a **GO** from `pnpm harness --profile <id>` (see
+  [`docs/harness.md`](docs/harness.md)); update [`harness/manifest.json`](harness/manifest.json)
+  in the same change when flag→migration→eval mappings change.
 - Multi-agent: respect lanes in `docs/codemap.md` / `docs/agent-orchestration.md`.
 - **Doc updates:** change `docs/state.md` when behaviour/deployment/gaps change; append architecture decisions to `docs/domains/campaign.md`; edit `prd.md` only when requirements change.
 
@@ -41,6 +45,8 @@ Do not read `prd.md` cover-to-cover for small fixes. Do not read future-plan doc
 ```bash
 pnpm check    # minimum before declaring success
 pnpm e2e      # route/auth/cross-role changes
+pnpm harness --profile baseline --run   # merge/deploy gate
+pnpm harness --profile pilot-u24        # print pilot go/no-go (run when enabling matrix/NPS)
 pnpm format   # before finishing
 ```
 

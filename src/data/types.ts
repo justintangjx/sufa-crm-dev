@@ -34,6 +34,13 @@ import type {
   CoachNoteGenerationResult,
 } from "../lib/coachNotes";
 import type { PriorCoachEvaluation } from "../types/database";
+import type { RosterImportCommitResult, RosterImportSourceRow } from "../lib/rosterImport";
+
+export type {
+  RosterImportCommitResult,
+  RosterImportPlan,
+  RosterImportSourceRow,
+} from "../lib/rosterImport";
 
 export type SignInResult =
   | { status: "magic_link_sent" }
@@ -85,6 +92,30 @@ export interface CampaignMemberAssignment {
   campaignId: string;
   athleteId: string;
   status: CampaignMemberStatus;
+}
+
+export interface CampaignCoachAssignment {
+  campaignId: string;
+  coachProfileId: string;
+}
+
+export interface CreateCoachProfileInput {
+  email: string;
+  fullName: string;
+}
+
+export interface CampaignCoachView {
+  id: string;
+  campaignId: string;
+  coachProfileId: string;
+  coachRole: "coach" | "head_coach" | "assistant_coach";
+  email: string;
+  name: string;
+}
+
+export interface CampaignRosterImportInput {
+  campaignId: string;
+  rows: RosterImportSourceRow[];
 }
 
 export interface NewCampaign {
@@ -227,7 +258,8 @@ export interface CampaignMatrixStatusRow {
   coachAssessments: CoachMatrixAssessment[];
   playerStatus: MatrixSubmissionStatus | "not_started";
   playerSubmittedCount: number;
-  submittedCoachCount: number;
+  /** Distinct coaches with ≥1 submitted assessment for this player (coverage, not soft 2/2). */
+  distinctSubmittedCoachCount: number;
 }
 
 export interface CampaignOperatingSummary {
@@ -318,11 +350,16 @@ export interface Api {
   listAthletes(): Promise<Athlete[]>;
   createAthlete(input: CreateAthleteInput): Promise<Athlete>;
   updateAthleteAsAdmin(athleteId: string, patch: AdminAthletePatch): Promise<Athlete>;
+  commitCampaignRosterImport(input: CampaignRosterImportInput): Promise<RosterImportCommitResult>;
   getAdminStats(): Promise<AdminStats>;
   listCampaigns(): Promise<Campaign[]>;
   getCampaign(id: string): Promise<Campaign | null>;
   createCampaign(input: NewCampaign, createdBy: string): Promise<Campaign>;
   assignCampaignMember(input: CampaignMemberAssignment): Promise<void>;
+  listCoachProfiles(): Promise<Profile[]>;
+  listCampaignCoaches(campaignId: string): Promise<CampaignCoachView[]>;
+  assignCampaignCoach(input: CampaignCoachAssignment): Promise<void>;
+  createCoachProfile(input: CreateCoachProfileInput): Promise<Profile>;
   getCampaignReadiness(campaignId: string): Promise<CampaignReadinessEntry[]>;
   getCampaignOperatingSummary(campaignId: string): Promise<CampaignOperatingSummary>;
   getCampaignMatrixStatus(campaignId: string): Promise<CampaignMatrixStatusRow[]>;

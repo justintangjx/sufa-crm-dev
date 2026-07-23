@@ -1,9 +1,8 @@
-# Agent Orchestration
+# Agent orchestration
 
-This repo can support separate player, admin, and coach coding agents. Role pages live
-under `src/routes/{player,admin,coach}/`; auth and routing are in `src/routes/index.tsx`.
+This repo can run separate player, admin, and coach coding agents. Role pages live under `src/routes/{player,admin,coach}/`. Auth and routing are in `src/routes/index.tsx`.
 
-## Recommended Setup
+## Recommended setup
 
 Use one coordinator plus role-focused agents:
 
@@ -12,12 +11,9 @@ Use one coordinator plus role-focused agents:
 - Admin flow agent
 - Coach flow agent
 
-The coordinator owns cross-cutting code and integration. Role agents own user-facing
-flows inside their lane.
+The coordinator owns cross-cutting code and integration. Role agents own user-facing flows inside their lane.
 
 ## Route split (done)
-
-Role-owned modules:
 
 ```txt
 src/routes/index.tsx           route wiring, TestApp, App export
@@ -28,17 +24,17 @@ src/routes/coach/*             coach pages
 src/components/shell/*         shared UI primitives
 ```
 
-## Agent Lanes
+## Agent lanes
 
-### Player Agent
+### Player agent
 
-Primary ownership:
+Owns:
 
 - `/player`
 - `/player/profile`
 - `/player/campaigns/:campaignId`
 - Player profile completion logic and UI
-- Player-facing assistant prompt: “What am I missing?”
+- Player-facing assistant prompt: "What am I missing?"
 
 Hard boundaries:
 
@@ -49,12 +45,12 @@ Hard boundaries:
 Suggested next work:
 
 - Improve player campaign readiness screen.
-- Add clearer save/review status for submitted profile changes.
-- Add component tests for player dashboard completion updates.
+- Clearer save/review status for submitted profile changes.
+- Component tests for player dashboard completion updates.
 
-### Admin Agent
+### Admin agent
 
-Primary ownership:
+Owns:
 
 - `/admin`
 - `/admin/players`
@@ -72,13 +68,14 @@ Hard boundaries:
 
 Suggested next work:
 
-- Add search and filters to `/admin/players`.
-- Implement CSV export actions in `/admin/exports`.
-- Add campaign creation form.
+- Admin coach assignment on campaign detail (pilot-critical; see `docs/state.md` PR-B).
+- Search and filters on `/admin/players`.
+- CSV export actions in `/admin/exports`.
+- Campaign creation form.
 
-### Coach Agent
+### Coach agent
 
-Primary ownership:
+Owns:
 
 - `/coach`
 - `/coach/campaigns/:campaignId`
@@ -94,12 +91,12 @@ Hard boundaries:
 Suggested next work:
 
 - Improve pending evaluation checklist.
-- Add validation before submit.
-- Add recently submitted evaluations.
+- Validation before submit.
+- Recently submitted evaluations.
 
-### Coordinator/Platform Agent
+### Coordinator / platform agent
 
-Primary ownership:
+Owns:
 
 - Routing and shared app shell
 - `src/data/types.ts` API contract
@@ -114,9 +111,9 @@ Hard boundaries:
 - Keep `pnpm check` passing before merging role branches.
 - Do not loosen RLS or role guards for convenience.
 
-## Branch Strategy
+## Branch strategy
 
-Use one branch per agent:
+One branch per agent:
 
 ```txt
 agent/player-flow
@@ -127,7 +124,7 @@ agent/platform
 
 Merge order:
 
-1. Platform refactors/shared API changes
+1. Platform refactors / shared API changes
 2. Role flow branches
 3. Final integration branch
 
@@ -148,16 +145,16 @@ git status
 
 Run `pnpm e2e` for cross-role or route-guard changes.
 
-## Conflict Rules
+## Conflict rules
 
 - If two agents need the same file, pause and coordinate ownership first.
 - Shared API changes go through the coordinator.
 - Role agents should add tests near their changed flow.
-- Never “fix” another role’s failing test by weakening assertions or role boundaries.
+- Never "fix" another role's failing test by weakening assertions or role boundaries.
 
-## Handoff Format
+## Handoff format
 
-Each agent should leave a short handoff in the PR or commit body:
+Leave a short handoff in the PR or commit body:
 
 ```md
 ## Scope

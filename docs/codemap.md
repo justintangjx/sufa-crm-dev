@@ -1,4 +1,4 @@
-# Code Map
+# Code map
 
 Where code lives and who owns it. Read with `docs/state.md` before editing.
 
@@ -21,29 +21,28 @@ src/lib/                      Domain logic (profile, passport, assistant, campai
 src/auth/AuthContext.tsx      Session + profile
 ```
 
-**Rule:** UI calls `api.*` only. Adapters enforce role boundaries; RLS is the final gate on Supabase.
+Rule: UI calls `api.*` only. Adapters enforce role boundaries. RLS is the final gate on Supabase.
 
 ## Feature flags (`src/lib/env.ts`)
 
 | Flag                             | Production default                                | Gates                            |
 | -------------------------------- | ------------------------------------------------- | -------------------------------- |
 | `useMockBackend`                 | On when no Supabase creds or `VITE_USE_MOCK=true` | Entire backend                   |
-| `enablePlayerGrowthMatrix`       | Off unless env true                               | Legacy Growth Matrix (SEA Games) |
-| `enableCampaignEvaluationMatrix` | Off unless env true                               | U24 live player/coach matrix     |
-| `enableCampaignNps`              | Off unless env true                               | U24 coach NPS                    |
+| `enablePlayerGrowthMatrix`       | Off unless env true; mock/test auto-on            | Legacy Growth Matrix (SEA Games) |
+| `enableCampaignEvaluationMatrix` | Off unless env true; mock/test auto-on            | U24 live player/coach matrix     |
+| `enableCampaignNps`              | Off unless env true; mock/test auto-on            | U24 coach NPS                    |
 | `enableCoachLlm`                 | Off unless Supabase + env true                    | Remote coach note Edge Function  |
 
-Campaign identity gating: `campaignCapabilities(campaign)` in `src/lib/campaignCapabilities.ts`
-combines flags with `isU24Campaign()` for matrix/NPS UI.
+Campaign identity gating: `campaignCapabilities(campaign)` in `src/lib/campaignCapabilities.ts` combines flags with `isU24Campaign()` for matrix/NPS UI.
 
 ## Agent ownership lanes
 
-| Lane            | Owns                                                                                    | Do not                              |
-| --------------- | --------------------------------------------------------------------------------------- | ----------------------------------- |
-| **Coordinator** | `src/routes/index.tsx`, `src/data/*`, `src/components/shell/`, migrations, shared types | Weaken RLS/guards                   |
-| **Player**      | `/player/*` pages, profile completion UI                                                | Expose other players or coach evals |
-| **Admin**       | `/admin/*` pages, reminder/review assistants                                            | Auto-send or auto-approve           |
-| **Coach**       | `/coach/*` pages, evaluation copilot                                                    | Show passport/NRIC/medical fields   |
+| Lane        | Owns                                                                                    | Do not                              |
+| ----------- | --------------------------------------------------------------------------------------- | ----------------------------------- |
+| Coordinator | `src/routes/index.tsx`, `src/data/*`, `src/components/shell/`, migrations, shared types | Weaken RLS/guards                   |
+| Player      | `/player/*` pages, profile completion UI                                                | Expose other players or coach evals |
+| Admin       | `/admin/*` pages, reminder/review assistants                                            | Auto-send or auto-approve           |
+| Coach       | `/coach/*` pages, evaluation copilot                                                    | Show passport/NRIC/medical fields   |
 
 Branch/merge order: platform → role flows → integration. See `docs/agent-orchestration.md`.
 

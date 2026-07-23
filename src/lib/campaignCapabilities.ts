@@ -17,10 +17,13 @@ export function campaignCapabilities(
   campaign: Pick<Campaign, "id" | "name" | "team"> | null | undefined,
 ): CampaignCapabilities {
   const u24 = isU24Campaign(campaign);
+  const liveMatrix = enableCampaignEvaluationMatrix && u24;
   return {
-    liveMatrix: enableCampaignEvaluationMatrix && u24,
+    liveMatrix,
     coachNps: enableCampaignNps && u24,
-    growthMatrix: enablePlayerGrowthMatrix,
-    legacyCoachEvaluation: true,
+    // U24 never shows Growth Matrix, even if the Cloudflare flag is mis-set.
+    growthMatrix: enablePlayerGrowthMatrix && !u24,
+    // U24 live matrix path hides legacy Evaluate links.
+    legacyCoachEvaluation: !liveMatrix,
   };
 }

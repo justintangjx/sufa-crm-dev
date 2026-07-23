@@ -1,8 +1,8 @@
-# SUFA CRM Context (deprecated)
+# SUFA CRM context (deprecated)
 
-This file was replaced by a tiered doc structure for coding agents.
+Replaced by a tiered doc set for coding agents.
 
-**Read instead:**
+Read instead:
 
 | Was here                                | Now                                                    |
 | --------------------------------------- | ------------------------------------------------------ |

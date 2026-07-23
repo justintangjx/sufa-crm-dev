@@ -1,8 +1,8 @@
-# Agent Documentation Index
+# Agent documentation index
 
-Progressive disclosure: read tier 0 first, then one task-specific doc.
+Read tier 0 first, then one task-specific doc.
 
-## Tier 0 — always read
+## Tier 0: always read
 
 | File                        | Purpose                                           |
 | --------------------------- | ------------------------------------------------- |
@@ -10,18 +10,19 @@ Progressive disclosure: read tier 0 first, then one task-specific doc.
 | [`state.md`](state.md)      | What is implemented, gaps, deployment, next queue |
 | [`codemap.md`](codemap.md)  | File layers, ownership lanes, feature flags       |
 
-## Tier 1 — read by task
+## Tier 1: read by task
 
-| Task                       | Read                                                     |
-| -------------------------- | -------------------------------------------------------- |
-| Commands / CI              | [`tooling.md`](tooling.md)                               |
-| Product requirements       | [`prd.md`](../prd.md) via [`prd-index.md`](prd-index.md) |
-| Campaign / matrix / NPS    | [`domains/campaign.md`](domains/campaign.md)             |
-| Coach LLM / Edge Functions | [`coach-llm.md`](coach-llm.md)                           |
-| Structural refactor        | [`cleanup-refactor-plan.md`](cleanup-refactor-plan.md)   |
-| Multi-agent parallel work  | [`agent-orchestration.md`](agent-orchestration.md)       |
+| Task                       | Read                                                                                |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| Deploy / flag go-no-go     | [`harness.md`](harness.md) + [`../harness/manifest.json`](../harness/manifest.json) |
+| Commands / CI              | [`tooling.md`](tooling.md)                                                          |
+| Product requirements       | [`prd.md`](../prd.md) via [`prd-index.md`](prd-index.md)                            |
+| Campaign / matrix / NPS    | [`domains/campaign.md`](domains/campaign.md)                                        |
+| Coach LLM / Edge Functions | [`coach-llm.md`](coach-llm.md)                                                      |
+| Structural refactor        | [`cleanup-refactor-plan.md`](cleanup-refactor-plan.md)                              |
+| Multi-agent parallel work  | [`agent-orchestration.md`](agent-orchestration.md)                                  |
 
-## Tier 2 — future / deep dive
+## Tier 2: future / deep dive
 
 | File                                                       | When                               |
 | ---------------------------------------------------------- | ---------------------------------- |
@@ -31,7 +32,7 @@ Progressive disclosure: read tier 0 first, then one task-specific doc.
 
 ## Adding documentation
 
-1. **One home per fact** — update `state.md` for current status; append decisions to domain docs.
-2. **New doc** → add a row to this index.
-3. **Future work** → do not add to tier 0; use tier 2 or `plans/` when that folder exists.
-4. **Do not duplicate** invariants from `AGENTS.md` into other files.
+1. One home per fact. Update `state.md` for current status. Append decisions to domain docs.
+2. New doc → add a row to this index.
+3. Future work stays out of tier 0. Use tier 2 or `plans/` when that folder exists.
+4. Do not copy invariants from `AGENTS.md` into other files.

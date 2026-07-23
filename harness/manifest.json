@@ -1,0 +1,242 @@
+{
+  "version": 1,
+  "title": "SUFA CRM deploy / pilot harness",
+  "purpose": "Single source of truth for go/no-go: automated gates, eval suite paths, feature-flag dependencies, and manual Supabase/Cloudflare work. Agents and humans use the same file.",
+  "usage": {
+    "print": "pnpm harness --profile <id>",
+    "runAutomated": "pnpm harness --profile <id> --run",
+    "listEvals": "pnpm harness --list-evals"
+  },
+  "evalSuites": {
+    "check": {
+      "id": "check",
+      "kind": "gate",
+      "command": "pnpm check",
+      "description": "sync coach-note-core + typecheck + lint + format:check + unit/component tests",
+      "paths": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/App.test.tsx"]
+    },
+    "e2e": {
+      "id": "e2e",
+      "kind": "gate",
+      "command": "pnpm e2e",
+      "description": "Playwright route/role flows (mock backend)",
+      "paths": ["e2e/"]
+    },
+    "campaignUnit": {
+      "id": "campaignUnit",
+      "kind": "suite",
+      "command": "pnpm exec vitest run src/lib/campaignManagement.test.ts src/lib/campaignCapabilities.test.ts",
+      "description": "Matrix completeness, NPS thresholds, U24 capability gating",
+      "paths": ["src/lib/campaignManagement.test.ts", "src/lib/campaignCapabilities.test.ts"]
+    },
+    "coachNotesDeterministic": {
+      "id": "coachNotesDeterministic",
+      "kind": "suite",
+      "command": "pnpm eval:coach:deterministic",
+      "description": "Coach note schema, grounding, decision suppression, multi-turn, core sync",
+      "paths": [
+        "src/lib/coachNotes.test.ts",
+        "src/shared/coach-note-core.sync.test.ts",
+        "src/evals/coach-notes/coachNotes.eval.test.ts",
+        "src/evals/coach-notes/multi-turn.eval.test.ts",
+        "src/evals/coach-notes/"
+      ]
+    },
+    "coachNotesLive": {
+      "id": "coachNotesLive",
+      "kind": "live",
+      "command": "pnpm eval:coach:live",
+      "description": "Live Edge Function eval against synthetic.v1.jsonl (requires staging coach JWT)",
+      "paths": ["src/evals/coach-notes/synthetic.v1.jsonl", "scripts/eval-coach-live.mjs"],
+      "requiresEnv": [
+        "COACH_NOTE_EVAL_URL",
+        "COACH_NOTE_EVAL_JWT",
+        "COACH_NOTE_EVAL_CAMPAIGN_ID",
+        "COACH_NOTE_EVAL_ATHLETE_ID"
+      ]
+    }
+  },
+  "flags": {
+    "VITE_ENABLE_CAMPAIGN_EVALUATION_MATRIX": {
+      "default": false,
+      "mockAutoOn": true,
+      "gates": ["liveMatrix"],
+      "docs": ["docs/domains/campaign.md", "docs/codemap.md"],
+      "supabase": {
+        "migrationsInOrder": [
+          "20260704000000_campaign_management_pivot.sql",
+          "20260713000000_closed_roster.sql",
+          "20260713000100_evaluation_history.sql"
+        ],
+        "notes": "Apply via Supabase SQL Editor in filename order. Closed roster + append-only matrix history required before enabling."
+      },
+      "cloudflare": {
+        "pagesEnv": {
+          "VITE_ENABLE_CAMPAIGN_EVALUATION_MATRIX": "true"
+        },
+        "notes": "Set only after migrations are applied on the linked Supabase project. Rebuild/redeploy Pages after env change."
+      },
+      "manualChecks": [
+        "Admin can open U24 campaign and see live matrix status panel",
+        "Coach can select a roster player and load that player's submitted self-evaluations",
+        "Coach can submit a matrix assessment, then start a second assessment (soft 2/2 UI when shipped)",
+        "Player can submit multiple self-evaluations (journal) and see history",
+        "Player can see submitted coach assessments about themselves only"
+      ],
+      "goNoGo": "NO-GO if migrations missing, flag on without history indexes, or coaches can edit submitted rows."
+    },
+    "VITE_ENABLE_CAMPAIGN_NPS": {
+      "default": false,
+      "mockAutoOn": true,
+      "gates": ["coachNps"],
+      "docs": ["docs/domains/campaign.md"],
+      "supabase": {
+        "migrationsInOrder": [
+          "20260704000000_campaign_management_pivot.sql",
+          "20260713000000_closed_roster.sql",
+          "20260713000200_bidirectional_nps.sql"
+        ],
+        "notes": "Bidirectional NPS (players↔coaches). Prefer enabling with evaluation matrix for U24 pilot."
+      },
+      "cloudflare": {
+        "pagesEnv": {
+          "VITE_ENABLE_CAMPAIGN_NPS": "true"
+        },
+        "notes": "Rebuild/redeploy Pages after env change."
+      },
+      "manualChecks": [
+        "Admin opens exactly one end-of-campaign NPS survey for the pilot (post/end window; leave mid closed)",
+        "Assigned players and coaches see NPS tasks and can submit once per target",
+        "Admin aggregate report shows both directions with withhold thresholds",
+        "Coaches never see raw individual NPS responses",
+        "Google Forms is not required for this campaign's NPS"
+      ],
+      "goNoGo": "NO-GO if flag on without bidirectional_nps migration, or raw responses visible to coaches."
+    },
+    "VITE_ENABLE_PLAYER_GROWTH_MATRIX": {
+      "default": false,
+      "mockAutoOn": true,
+      "gates": ["growthMatrix"],
+      "docs": ["docs/codemap.md"],
+      "supabase": {
+        "migrationsInOrder": ["20260623000000_player_growth_matrix.sql"],
+        "notes": "Legacy SEA Games Growth Matrix. Keep OFF for U24 pilot."
+      },
+      "cloudflare": {
+        "pagesEnv": {
+          "VITE_ENABLE_PLAYER_GROWTH_MATRIX": "true"
+        },
+        "notes": "Not part of U24 pilot profile."
+      },
+      "manualChecks": ["Only enable for SEA Games / Growth Matrix demos, not U24 Worlds pilot"],
+      "goNoGo": "For pilot-u24 profile this flag must stay false in Cloudflare Pages."
+    },
+    "VITE_ENABLE_COACH_LLM": {
+      "default": false,
+      "mockAutoOn": false,
+      "gates": ["legacyCoachEvaluationCopilot"],
+      "docs": ["docs/coach-llm.md"],
+      "supabase": {
+        "migrationsInOrder": [
+          "20260615000000_coach_note_generation.sql",
+          "20260617000000_coach_note_copilot.sql",
+          "20260618000000_coach_note_deterministic_telemetry.sql",
+          "20260619000000_coach_note_llm_telemetry_insert.sql",
+          "20260621000000_coach_note_assignment_rpc.sql",
+          "20260622000000_coach_note_table_grants.sql"
+        ],
+        "edgeFunctions": ["structure-coach-notes"],
+        "edgeSecrets": [
+          "COACH_NOTE_API_URL",
+          "COACH_NOTE_API_KEY",
+          "COACH_NOTE_MODEL",
+          "COACH_NOTE_PROVIDER_TIMEOUT_MS",
+          "COACH_NOTE_INPUT_COST_PER_MILLION",
+          "COACH_NOTE_OUTPUT_COST_PER_MILLION"
+        ],
+        "notes": "Lives on legacy /coach/evaluations route, not U24 live matrix. Partial migration apply breaks telemetry."
+      },
+      "cloudflare": {
+        "pagesEnv": {
+          "VITE_ENABLE_COACH_LLM": "true"
+        },
+        "notes": "Enable only after Edge Function deploy + deterministic + live evals pass."
+      },
+      "manualChecks": [
+        "structure-coach-notes deployed and returns grounded drafts for a staging coach JWT",
+        "Failed remote generation does not silently swap in deterministic output without coach consent",
+        "Copilot never writes ratings/recommendations; coach saves explicitly"
+      ],
+      "goNoGo": "NO-GO if live eval gates fail, Edge Function missing, or flag on without coach-note migrations."
+    }
+  },
+  "profiles": {
+    "baseline": {
+      "id": "baseline",
+      "description": "Minimum gate before any merge or Pages deploy that does not enable optional flags.",
+      "requiresFlagsOn": [],
+      "requiresFlagsOff": [],
+      "automatedSuites": ["check", "e2e"],
+      "liveSuites": [],
+      "manualChecks": [
+        "Cloudflare Pages build has VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_APP_URL when using Supabase backend",
+        "Optional VITE_ENABLE_* flags remain false unless their profile below is green"
+      ],
+      "acceptance": ["pnpm check passes", "pnpm e2e passes"],
+      "verdictRule": "GO only if all automatedSuites pass and listed manualChecks are confirmed."
+    },
+    "pilot-u24": {
+      "id": "pilot-u24",
+      "description": "One campaign; open roster (~12-25 players, 1-3 coaches); soft coach 2/2; player journal; in-app end NPS (replaces Google Forms). Coach LLM and Growth Matrix stay off.",
+      "requiresFlagsOn": ["VITE_ENABLE_CAMPAIGN_EVALUATION_MATRIX", "VITE_ENABLE_CAMPAIGN_NPS"],
+      "requiresFlagsOff": ["VITE_ENABLE_PLAYER_GROWTH_MATRIX", "VITE_ENABLE_COACH_LLM"],
+      "automatedSuites": ["check", "campaignUnit", "e2e"],
+      "liveSuites": [],
+      "manualChecks": [
+        "Pilot campaigns exist; admin can import roster CSV (~22/team) and assign coaches (1-3) via UI",
+        "Magic-link emails for pilot players/coaches are deliverable (not .test) if using real Auth",
+        "Campaign migrations applied on the target Supabase project (matrix + closed roster + history + NPS)",
+        "Cloudflare Pages env matches requiresFlagsOn/Off for this profile",
+        "U24 UI does not push coaches onto legacy Growth Matrix or /coach/evaluations for the pilot path",
+        "Admin can open/close a single end-of-campaign NPS survey (POST; mid stays closed)",
+        "Soft UI shows coach assessment progress toward 2 submits per player (nudge at 0; confirm at/over 2; no hard DB cap)"
+      ],
+      "acceptance": [
+        "Admin assigns coaches from campaign UI without SQL",
+        "Admin can preview and commit a campaign roster CSV (create/assign by email; one campaign per file)",
+        "Coach can filter/select by player and load that player's records",
+        "Coach can submit two matrix assessments per player within the campaign (soft limit)",
+        "Player can view past self-evaluations and submit unlimited journal entries",
+        "Player can view coaches' submitted assessments about them",
+        "Admin runs one in-app NPS at campaign end; aggregate dashboard readable; Forms not required"
+      ],
+      "verdictRule": "GO only if automatedSuites pass, every requiresFlagsOn dependency (migrations + Cloudflare env) is confirmed, requiresFlagsOff remain false, and all acceptance bullets are demonstrated on the pilot roster."
+    },
+    "coach-llm": {
+      "id": "coach-llm",
+      "description": "Enable remote Evaluation copilot on legacy coach evaluation page.",
+      "requiresFlagsOn": ["VITE_ENABLE_COACH_LLM"],
+      "requiresFlagsOff": [],
+      "automatedSuites": ["check", "coachNotesDeterministic", "e2e"],
+      "liveSuites": ["coachNotesLive"],
+      "manualChecks": [
+        "All coach-note migrations applied in order",
+        "structure-coach-notes Edge Function deployed with secrets",
+        "Human blind-review gate in docs/coach-llm.md considered for production"
+      ],
+      "acceptance": [
+        "Deterministic eval suite green",
+        "Live eval suite green against deployed function",
+        "Coach can structure notes without auto ratings/recommendations"
+      ],
+      "verdictRule": "GO only if automated + live suites pass and Edge Function secrets are set. Otherwise keep VITE_ENABLE_COACH_LLM=false."
+    }
+  },
+  "agentRules": [
+    "Treat harness/manifest.json as authoritative for flag→migration→eval mapping; update it in the same PR when flags, migrations, or eval commands change.",
+    "Do not enable a VITE_ENABLE_* flag in Cloudflare until that flag's supabase.migrationsInOrder are applied on the linked project.",
+    "Unprovisioned infra → leave flag false (production-safe default).",
+    "Agents have no direct DB access; list manual Supabase/Cloudflare steps explicitly in the final response.",
+    "Do not weaken tests or skip harness gates to force a GO."
+  ]
+}

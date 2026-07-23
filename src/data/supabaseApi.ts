@@ -45,13 +45,17 @@ import type {
   AdminAthletePatch,
   Api,
   AthletePatch,
+  CampaignCoachAssignment,
+  CampaignCoachView,
   CampaignMatrixStatusRow,
   CampaignOperatingSummary,
   CampaignReadinessEntry,
+  CampaignRosterImportInput,
   CampaignWithMembership,
   ChangeRequestView,
   CoachMatrixInput,
   CreateAthleteInput,
+  CreateCoachProfileInput,
   EvaluationInput,
   GrowthReviewInput,
   GrowthReviewWithDetails,
@@ -63,9 +67,11 @@ import type {
   NpsTask,
   NpsTaskTarget,
   PlayerMatrixInput,
+  RosterImportCommitResult,
   SignInResult,
   TryoutBriefingInput,
 } from "./types";
+import { planRosterImport } from "../lib/rosterImport";
 import type { CoachNoteActionRequest, CoachNoteGenerationRequest } from "../lib/coachNotes";
 import { executeDeterministicCoachNoteAction } from "./coachNoteExecutor";
 import { createSupabaseCoachNotePersistence } from "./coachNoteSupabasePersistence";
@@ -333,6 +339,56 @@ export const supabaseApi: Api = {
     return data as Athlete;
   },
 
+  async commitCampaignRosterImport(
+    input: CampaignRosterImportInput,
+  ): Promise<RosterImportCommitResult> {
+    const [athletes, readiness] = await Promise.all([
+      supabaseApi.listAthletes(),
+      supabaseApi.getCampaignReadiness(input.campaignId),
+    ]);
+    const memberAthleteIds = new Set(readiness.map((row) => row.athleteId));
+    const plan = planRosterImport({
+      campaignId: input.campaignId,
+      rows: input.rows,
+      athletes,
+      memberAthleteIds,
+    });
+
+    let createdAthletes = 0;
+    let assignedMembers = 0;
+    // Sequential on purpose: each create must land before later rows can match by email.
+    for (const action of plan.rows) {
+      if (action.kind === "create_and_assign") {
+        // eslint-disable-next-line no-await-in-loop -- roster rows must commit in order
+        const created = await supabaseApi.createAthlete(action.fields);
+        // eslint-disable-next-line no-await-in-loop -- roster rows must commit in order
+        await supabaseApi.assignCampaignMember({
+          campaignId: input.campaignId,
+          athleteId: created.id,
+          status: action.memberStatus,
+        });
+        createdAthletes += 1;
+        assignedMembers += 1;
+      } else if (action.kind === "assign_only") {
+        // eslint-disable-next-line no-await-in-loop -- roster rows must commit in order
+        await supabaseApi.assignCampaignMember({
+          campaignId: input.campaignId,
+          athleteId: action.athleteId,
+          status: action.memberStatus,
+        });
+        assignedMembers += 1;
+      }
+    }
+
+    return {
+      plan,
+      createdAthletes,
+      assignedMembers,
+      skipped: plan.counts.skip,
+      errors: plan.counts.error,
+    };
+  },
+
   async updateAthleteAsAdmin(athleteId: string, patch: AdminAthletePatch) {
     const { data: existing, error: fetchError } = await client()
       .from("athletes")
@@ -414,6 +470,73 @@ export const supabaseApi: Api = {
     }
   },
 
+  async listCoachProfiles() {
+    const { data, error } = await client().from("profiles").select("*").eq("role", "coach");
+    if (error) {
+      throw error;
+    }
+    return (data ?? []) as Profile[];
+  },
+
+  async listCampaignCoaches(campaignId: string): Promise<CampaignCoachView[]> {
+    const { data, error } = await client()
+      .from("campaign_coaches")
+      .select(
+        "id, campaign_id, coach_profile_id, coach_role, profiles(email, full_name, preferred_name)",
+      )
+      .eq("campaign_id", campaignId);
+    if (error) {
+      throw error;
+    }
+    return (
+      (data ?? []) as unknown as {
+        id: string;
+        campaign_id: string;
+        coach_profile_id: string;
+        coach_role: CampaignCoachView["coachRole"];
+        profiles: Pick<Profile, "email" | "full_name" | "preferred_name"> | null;
+      }[]
+    ).map((row) => ({
+      id: row.id,
+      campaignId: row.campaign_id,
+      coachProfileId: row.coach_profile_id,
+      coachRole: row.coach_role,
+      email: row.profiles?.email ?? "",
+      name: row.profiles ? profileDisplayName(row.profiles) : row.coach_profile_id,
+    }));
+  },
+
+  async assignCampaignCoach(input: CampaignCoachAssignment) {
+    const { data: profile, error: profileError } = await client()
+      .from("profiles")
+      .select("id, role")
+      .eq("id", input.coachProfileId)
+      .maybeSingle();
+    if (profileError) {
+      throw profileError;
+    }
+    if (!profile || profile.role !== "coach") {
+      throw new Error("Coach profile not found");
+    }
+    const { error } = await client().from("campaign_coaches").upsert(
+      {
+        campaign_id: input.campaignId,
+        coach_profile_id: input.coachProfileId,
+        coach_role: "coach",
+      },
+      { onConflict: "campaign_id,coach_profile_id" },
+    );
+    if (error) {
+      throw error;
+    }
+  },
+
+  async createCoachProfile(_input: CreateCoachProfileInput): Promise<Profile> {
+    throw new Error(
+      "Coach accounts must be created in Supabase Auth with user_metadata.role=coach, then assigned here.",
+    );
+  },
+
   async getCampaignReadiness(campaignId: string): Promise<CampaignReadinessEntry[]> {
     const { data } = await client()
       .from("campaign_members")
@@ -455,7 +578,7 @@ export const supabaseApi: Api = {
       playerMatrixSubmittedCount: matrixRows.filter((row) => row.playerStatus === "submitted")
         .length,
       coachMatrixSubmittedCount: matrixRows.reduce(
-        (total, row) => total + row.submittedCoachCount,
+        (total, row) => total + row.distinctSubmittedCoachCount,
         0,
       ),
       openNpsSurveyCount: surveys.filter((survey) => survey.status === "open").length,
@@ -516,7 +639,7 @@ export const supabaseApi: Api = {
         coachAssessments: [...latestPerCoach.values()],
         playerStatus: playerSubmission?.status ?? "not_started",
         playerSubmittedCount: playerRows.filter((row) => row.status === "submitted").length,
-        submittedCoachCount: new Set(
+        distinctSubmittedCoachCount: new Set(
           coachRows
             .filter((assessment) => assessment.status === "submitted")
             .map((assessment) => assessment.coach_profile_id),

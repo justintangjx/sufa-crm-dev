@@ -1,23 +1,37 @@
-# Repository State
+# Repository state
 
-Live snapshot for coding agents. Update this file when behaviour, deployment, gaps, or the
-build queue changes. Canonical requirements remain in `prd.md`.
+Live snapshot for coding agents. Update this file when behaviour, deployment, gaps, or the build queue changes. Canonical requirements stay in `prd.md`.
 
 ## Now
 
-- **Phase 0** done: shell components, campaign capabilities, adapter payloads.
-- **Phase 1e** done: coach routes in `src/routes/coach/`; `src/App.tsx` removed.
-- **U24 roster + evaluation redesign** done: closed roster (admin creates players, email is
+- Phase 0 done: shell components, campaign capabilities, adapter payloads.
+- Phase 1e done: coach routes in `src/routes/coach/`; `src/App.tsx` removed.
+- U24 roster + evaluation redesign done: closed roster (admin creates players, email is
   the login key), append-only evaluation history with drafts, bidirectional NPS. See
   [`domains/campaign.md`](domains/campaign.md) decision log (2026-07-13 entries).
-- MVP focus: **U24 Worlds 2026** (`c-u24`). SEA Games 2026 is legacy Growth Matrix demo data.
+- Soft coach assessment cadence shipped: max 2 submitted per player with nudge at 0 and
+  confirm at/over 2 (`src/lib/matrixSoftLimit.ts` on `CoachCampaignPage`). DB stays
+  append-only.
+- Pilot hide + ops shipped: U24 capabilities hide Growth/legacy Evaluate; admin coach
+  assign UI; `distinctSubmittedCoachCount` rename; NPS post-primary panel +
+  `buildNpsAggregateSnapshot` (Telegram deferred).
+- MVP focus: U24 Worlds 2026 (`c-u24`). SEA Games 2026 is legacy Growth Matrix demo data.
+- Pilot roster policy: open band (~12–25 players, 1–3 coaches), not a frozen exact N.
+  All coaches use role `coach` (no head/assistant UX). See campaign decision log.
 
-## Next queue
+## Pilot next
 
-1. U24 roster CSV import.
-2. `/admin/players` search and filters.
-3. `/admin/exports` CSV actions.
-4. Expand Playwright E2E for U24 matrix/NPS flows.
+`pnpm harness --profile pilot-u24 --run` + human migrations/env/smoke. Do **not** DROP
+Growth Matrix / coach-LLM schema before FULL_GO (hide via flags + capabilities only).
+
+## Next queue (after / beside pilot)
+
+1. `/admin/players` search and filters.
+2. `/admin/exports` CSV actions.
+3. Expand Playwright E2E for U24 matrix/NPS + soft-limit confirms + coach assign + roster import.
+4. NPS Telegram delivery after aggregate dashboard is trusted.
+5. Optional Sheets `fetchSheetRows` adapter if CSV download becomes ops pain.
+6. Post-FULL_GO cleanup only: decide kill vs keep Growth Matrix demos / LLM stack.
 
 ## Implemented
 
@@ -34,16 +48,31 @@ build queue changes. Canonical requirements remain in `prd.md`.
   `can_request_player_magic_link` RPC; `handle_new_user` links roster athletes by email.
 - U24 evaluation history: append-only submitted self-evaluations and coach assessments with
   one open draft per tuple; player/coach timelines; submitted rows immutable via RLS.
+- Soft coach matrix cadence: `matrixSoftLimit.ts` (nudge at 0, confirm at/over 2 submitted).
+- U24 capability hide: Growth Matrix and legacy Evaluate off when live matrix is on
+  (`campaignCapabilities.ts`).
+- Admin coach assignment on campaign detail (`listCoachProfiles` /
+  `listCampaignCoaches` / `assignCampaignCoach` / mock `createCoachProfile`).
+- Campaign roster CSV import: `planRosterImport` + preview/commit on campaign detail
+  (`AdminRosterImportPanel`); email match key; coaches and multi-team splitting out.
+- Matrix coverage field: `distinctSubmittedCoachCount` (not soft 2/2 own-submit count).
+- NPS post-primary admin UI + `buildNpsAggregateSnapshot`; mock seed keeps mid+post closed.
 - Bidirectional NPS: players rate coaches and coaches rate players per survey;
   direction-specific withhold thresholds; admin report shows both directions
   (feature-flagged on Supabase).
+- Deploy/pilot harness: `harness/manifest.json` + `pnpm harness` (flag→migration→eval
+  go/no-go; profiles `baseline`, `pilot-u24`, `coach-llm`). Suites are profile-only;
+  `--run` is AUTOMATED_GO only; printout labels MACHINE vs HUMAN and lists OFF-flag
+  Cloudflare keep-false notes. Not the PRD §22 assistant eval harness.
 
 ## Known gaps
 
-- No bulk U24 roster import (one-by-one `campaign_members` assignment only).
-- `/admin/exports` placeholder; CSV helpers exist in `src/lib/csv.ts`.
+- `/admin/exports` placeholder; export helpers exist in `src/lib/csv.ts` (roster import is separate).
 - Light E2E coverage; coach evaluation submit validation is minimal.
 - Production magic links need deliverable emails (`.test` addresses are mock-only).
+- Supabase cannot create Auth coach users from the CRM client; create Auth user with
+  `role=coach` then assign on campaign detail.
+- NPS Telegram delivery not wired.
 
 ## Deployment snapshot
 
@@ -63,29 +92,30 @@ VITE_ENABLE_PLAYER_GROWTH_MATRIX=false
 VITE_ENABLE_COACH_LLM=false
 ```
 
-Campaign-management migrations (apply in order): `20260704000000_campaign_management_pivot.sql`,
-`20260713000000_closed_roster.sql`, `20260713000100_evaluation_history.sql`,
-`20260713000200_bidirectional_nps.sql`.
+Campaign-management migrations (apply in order): `20260704000000_campaign_management_pivot.sql`, `20260713000000_closed_roster.sql`, `20260713000100_evaluation_history.sql`, `20260713000200_bidirectional_nps.sql`.
 
 Detailed Supabase/Cloudflare setup: [`domains/campaign.md`](domains/campaign.md) and [`coach-llm.md`](coach-llm.md).
 
 ## Demo quick-ref
 
-**Mock mode** (no Supabase env, or `VITE_USE_MOCK=true`):
+Mock mode (no Supabase env, or `VITE_USE_MOCK=true`):
 
 - `admin@sufa.test`, `coach@sufa.test`, `alice@sufa.test`, `derrick@sufa.test`
-- `elle@sufa.test` — roster-only player (no profile yet); first sign-in demonstrates
-  closed-roster provisioning (invited → registered)
+- `elle@sufa.test`: roster-only player (no profile yet); first sign-in shows closed-roster provisioning (invited → registered)
 - U24 campaign `c-u24`; selected players Alice, Ben, Cara; Elle invited
 - All campaign feature flags enabled in mock/test
 
-**U24 smoke path:** sign in as admin → `/admin/campaigns/c-u24` → matrix + NPS panels.
+U24 smoke path: sign in as admin → `/admin/campaigns/c-u24` → matrix + NPS panels.
 
-**Growth Matrix (legacy):** `alice@sufa.test` → SEA Games `c-sea` (not U24).
+Growth Matrix (legacy): `alice@sufa.test` → SEA Games `c-sea` (not U24).
 
 ## Verification
 
 ```bash
 pnpm check    # typecheck + lint + format + unit tests
 pnpm e2e      # after route/auth changes
+pnpm harness --profile baseline --run   # merge/deploy automated gate
+pnpm harness --profile pilot-u24        # print U24 pilot go/no-go + manual deps
 ```
+
+Flag enable / pilot ship decisions: [`harness.md`](harness.md) / [`../harness/manifest.json`](../harness/manifest.json).

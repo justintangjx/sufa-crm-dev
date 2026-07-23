@@ -7,6 +7,13 @@ import { api } from "../../data";
 import type { CampaignMatrixStatusRow, GrowthReviewWithDetails, NpsTask } from "../../data/types";
 import { campaignCapabilities } from "../../lib/campaignCapabilities";
 import { optionalText } from "../../lib/form";
+import {
+  SOFT_COACH_ASSESSMENT_TARGET,
+  countOwnSubmittedAssessments,
+  requiresSoftLimitConfirm,
+  softLimitCopy,
+  softLimitPhase,
+} from "../../lib/matrixSoftLimit";
 import type {
   Campaign,
   CoachAthleteView,
@@ -122,6 +129,16 @@ export function CoachCampaignPage() {
   }
 
   function startNewAssessment() {
+    if (!profile) {
+      return;
+    }
+    const ownSubmittedCount = countOwnSubmittedAssessments(ownAssessmentHistory, profile.id);
+    if (requiresSoftLimitConfirm(ownSubmittedCount)) {
+      const { confirmBody } = softLimitCopy(softLimitPhase(ownSubmittedCount), ownSubmittedCount);
+      if (!window.confirm(confirmBody)) {
+        return;
+      }
+    }
     // Prefill from the latest submitted assessment so coaches adjust, not retype.
     const latest = ownAssessmentHistory[0] ?? null;
     setCoachMatrixForm({
@@ -184,6 +201,15 @@ export function CoachCampaignPage() {
       setMessage("Choose a player before saving a matrix assessment.");
       return;
     }
+    if (status === "submitted") {
+      const ownSubmittedCount = countOwnSubmittedAssessments(ownAssessmentHistory, profile.id);
+      if (requiresSoftLimitConfirm(ownSubmittedCount)) {
+        const { confirmBody } = softLimitCopy(softLimitPhase(ownSubmittedCount), ownSubmittedCount);
+        if (!window.confirm(confirmBody)) {
+          return;
+        }
+      }
+    }
     await api.saveCoachMatrixAssessment(
       coachMatrixInputFromForm(coachMatrixForm, {
         campaignId,
@@ -232,6 +258,11 @@ export function CoachCampaignPage() {
   const coachCaps = campaignCapabilities(campaign);
   const showCampaignMatrix = coachCaps.liveMatrix;
   const latestPlayerSelfEvaluation = playerHistory[0] ?? null;
+  const ownSubmittedCount = profile
+    ? countOwnSubmittedAssessments(ownAssessmentHistory, profile.id)
+    : 0;
+  const assessmentSoftPhase = softLimitPhase(ownSubmittedCount);
+  const assessmentSoftCopy = softLimitCopy(assessmentSoftPhase, ownSubmittedCount);
 
   return (
     <>
@@ -322,10 +353,26 @@ export function CoachCampaignPage() {
         <section className="card stack">
           <div className="section-title">
             <h2>U24 coach matrix assessment</h2>
+            <Badge
+              tone={
+                assessmentSoftPhase === "none"
+                  ? "warn"
+                  : assessmentSoftPhase === "over"
+                    ? "warn"
+                    : "ok"
+              }
+            >
+              {assessmentSoftCopy.badge}
+            </Badge>
             <Badge tone={coachMatrixForm.status === "submitted" ? "ok" : "warn"}>
               {assessmentEditorOpen ? coachMatrixForm.status : "submitted"}
             </Badge>
           </div>
+          {assessmentSoftCopy.nudge ? (
+            <p className={assessmentSoftPhase === "none" ? "note-box" : "muted"}>
+              {assessmentSoftCopy.nudge}
+            </p>
+          ) : null}
           <div className="grid cols-2">
             <div className="field">
               <label htmlFor="coach-matrix-athlete">Player</label>
@@ -485,8 +532,9 @@ export function CoachCampaignPage() {
             </div>
           ) : null}
           <p className="muted">
-            Submitted assessments are immutable and visible to the player and admin. Each save is
-            recorded in the evaluation audit trail.
+            Soft maximum {SOFT_COACH_ASSESSMENT_TARGET} submitted assessments per player. Submitted
+            rows are immutable and visible to the player and admin. Each save is recorded in the
+            evaluation audit trail.
           </p>
         </section>
       ) : null}

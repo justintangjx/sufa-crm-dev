@@ -1,8 +1,14 @@
+import { useState } from "react";
 import { Badge, StatCard } from "../../components/shell/PagePrimitives";
 import type { CampaignMatrixStatusRow, GrowthReviewWithDetails, NpsReport } from "../../data/types";
+import { buildNpsAggregateSnapshot, U24_PILOT_NPS_POLICY } from "../../lib/npsAggregateSnapshot";
 import { canShareGrowthReview, getQuadrantInfo } from "../../lib/playerGrowth";
 import { growthStatusTone } from "../player/PlayerCampaignPanels";
-import type { CampaignTryoutBriefing, EvaluationAuditEvent } from "../../types/database";
+import type {
+  CampaignNpsSurvey,
+  CampaignTryoutBriefing,
+  EvaluationAuditEvent,
+} from "../../types/database";
 
 export function AdminGrowthMatrixPanel({
   briefing,
@@ -105,7 +111,7 @@ export function AdminLiveMatrixPanel({
   auditEvents: EvaluationAuditEvent[];
 }) {
   const playerSubmitted = rows.filter((row) => row.playerSubmittedCount > 0).length;
-  const coachSubmitted = rows.reduce((total, row) => total + row.submittedCoachCount, 0);
+  const coachSubmitted = rows.reduce((total, row) => total + row.distinctSubmittedCoachCount, 0);
 
   return (
     <section className="card stack">
@@ -125,7 +131,7 @@ export function AdminLiveMatrixPanel({
         <StatCard
           label="Coach assessments"
           value={coachSubmitted}
-          detail="Submitted coach-player records"
+          detail="Distinct coaches with a submitted assessment"
           tone="accent"
         />
         <StatCard
@@ -142,7 +148,7 @@ export function AdminLiveMatrixPanel({
               <th>Player</th>
               <th>Latest status</th>
               <th>Self-evals submitted</th>
-              <th>Coaches submitted</th>
+              <th>Distinct coaches submitted</th>
               <th>Player notes</th>
             </tr>
           </thead>
@@ -152,7 +158,7 @@ export function AdminLiveMatrixPanel({
                 <td>{row.athleteName}</td>
                 <td>{row.playerStatus}</td>
                 <td>{row.playerSubmittedCount}</td>
-                <td>{row.submittedCoachCount}</td>
+                <td>{row.distinctSubmittedCoachCount}</td>
                 <td>{row.playerSubmission?.development_focus ?? "-"}</td>
               </tr>
             ))}
@@ -180,38 +186,97 @@ export function AdminLiveMatrixPanel({
 }
 
 export function AdminNpsPanel({
+  campaignId,
   report,
-  onOpenMid,
+  surveys,
   onOpenPost,
-  onCloseMid,
   onClosePost,
+  onOpenMid,
+  onCloseMid,
 }: {
+  campaignId: string;
   report: NpsReport;
-  onOpenMid: () => void;
+  surveys: CampaignNpsSurvey[];
   onOpenPost: () => void;
-  onCloseMid: () => void;
   onClosePost: () => void;
+  onOpenMid: () => void;
+  onCloseMid: () => void;
 }) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const snapshot = buildNpsAggregateSnapshot(campaignId, report, surveys);
+  const post = surveys.find((survey) => survey.survey_window === "post_season");
+  const mid = surveys.find((survey) => survey.survey_window === "mid_season");
+  const postOpen = post?.status === "open";
+  const postCompletion = snapshot.completion.find((row) => row.window === "post_season");
+
   return (
     <section className="card stack">
       <div className="section-title">
         <h2>Campaign NPS</h2>
-        <Badge>anonymous aggregate</Badge>
+        <Badge tone={postOpen ? "ok" : "warn"}>
+          {postOpen ? "end survey open" : "end survey closed"}
+        </Badge>
       </div>
+      <p>
+        Pilot primary window is{" "}
+        <strong>{U24_PILOT_NPS_POLICY.primaryWindow.replace("_", "-")}</strong>. Open this once at
+        campaign end (replaces Google Forms). Mid-season stays optional.
+      </p>
       <div className="btn-row">
-        <button type="button" className="btn" onClick={onOpenMid}>
-          Open mid-season NPS
+        <button type="button" className="btn primary" onClick={onOpenPost} disabled={postOpen}>
+          Open end-of-campaign NPS
         </button>
-        <button type="button" className="btn" onClick={onOpenPost}>
-          Open post-season NPS
-        </button>
-        <button type="button" className="btn" onClick={onCloseMid}>
-          Close mid-season
-        </button>
-        <button type="button" className="btn" onClick={onClosePost}>
-          Close post-season
+        <button type="button" className="btn" onClick={onClosePost} disabled={!postOpen}>
+          Close end-of-campaign NPS
         </button>
       </div>
+      {postCompletion ? (
+        <div className="grid cols-2">
+          <StatCard
+            label="Coach subjects (end)"
+            value={postCompletion.coachSubjects}
+            detail={`${postCompletion.coachRowResponses} player→coach responses`}
+            tone="accent"
+          />
+          <StatCard
+            label="Player subjects (end)"
+            value={postCompletion.playerSubjects}
+            detail={`${postCompletion.playerRowResponses} coach→player responses`}
+            tone="ok"
+          />
+        </div>
+      ) : null}
+      {U24_PILOT_NPS_POLICY.allowMidControls ? (
+        <div className="stack">
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => setShowAdvanced((current) => !current)}
+          >
+            {showAdvanced ? "Hide mid-season controls" : "Advanced: mid-season (optional)"}
+          </button>
+          {showAdvanced ? (
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn"
+                onClick={onOpenMid}
+                disabled={mid?.status === "open"}
+              >
+                Open mid-season NPS
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={onCloseMid}
+                disabled={mid?.status !== "open"}
+              >
+                Close mid-season
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <div className="stack">
         <strong>Players rating coaches</strong>
         <div className="table-wrap">
@@ -269,7 +334,7 @@ export function AdminNpsPanel({
       <p className="muted">
         Raw responses are never shown here. Aggregates unlock only once each direction&apos;s
         response threshold is met (player-rater and coach-rater thresholds differ because coach
-        pools are small).
+        pools are small). Telegram delivery is not wired yet.
       </p>
     </section>
   );

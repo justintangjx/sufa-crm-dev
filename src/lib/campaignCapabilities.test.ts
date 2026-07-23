@@ -46,8 +46,8 @@ describe("campaignCapabilities", () => {
     const caps = campaignCapabilities(u24Campaign);
     expect(caps.liveMatrix).toBe(true);
     expect(caps.coachNps).toBe(true);
-    expect(caps.growthMatrix).toBe(true);
-    expect(caps.legacyCoachEvaluation).toBe(true);
+    expect(caps.growthMatrix).toBe(false);
+    expect(caps.legacyCoachEvaluation).toBe(false);
   });
 
   it("withholds U24 matrix and NPS for non-U24 campaigns", () => {
@@ -55,6 +55,7 @@ describe("campaignCapabilities", () => {
     expect(caps.liveMatrix).toBe(false);
     expect(caps.coachNps).toBe(false);
     expect(caps.growthMatrix).toBe(true);
+    expect(caps.legacyCoachEvaluation).toBe(true);
   });
 
   it("reports whether any optional campaign feature is enabled", () => {

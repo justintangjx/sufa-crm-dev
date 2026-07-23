@@ -4,6 +4,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { Badge, PageHead } from "../../components/shell/PagePrimitives";
 import { api } from "../../data";
 import type {
+  CampaignCoachView,
   CampaignMatrixStatusRow,
   CampaignReadinessEntry,
   GrowthReviewWithDetails,
@@ -17,14 +18,17 @@ import type {
   Athlete,
   AssistantDraft,
   Campaign,
+  CampaignNpsSurvey,
   CampaignTryoutBriefing,
   EvaluationAuditEvent,
+  Profile,
 } from "../../types/database";
 import {
   buildIncompletePlayersAnswer,
   buildSportSyncReadinessAnswer,
 } from "./adminCampaignAssistant";
 import { AdminGrowthMatrixPanel, AdminLiveMatrixPanel, AdminNpsPanel } from "./AdminCampaignPanels";
+import { AdminRosterImportPanel } from "./AdminRosterImportPanel";
 import { emptyCampaignAssignmentForm, type CampaignAssignmentFormState } from "./adminCampaignForm";
 
 export function AdminCampaignDetailPage() {
@@ -33,6 +37,10 @@ export function AdminCampaignDetailPage() {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [rows, setRows] = useState<CampaignReadinessEntry[]>([]);
   const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [coachProfiles, setCoachProfiles] = useState<Profile[]>([]);
+  const [campaignCoaches, setCampaignCoaches] = useState<CampaignCoachView[]>([]);
+  const [coachAssignId, setCoachAssignId] = useState("");
+  const [newCoach, setNewCoach] = useState({ name: "", email: "" });
   const [assignment, setAssignment] = useState<CampaignAssignmentFormState>(
     emptyCampaignAssignmentForm,
   );
@@ -42,6 +50,7 @@ export function AdminCampaignDetailPage() {
   const [matrixRows, setMatrixRows] = useState<CampaignMatrixStatusRow[]>([]);
   const [auditEvents, setAuditEvents] = useState<EvaluationAuditEvent[]>([]);
   const [npsReport, setNpsReport] = useState<NpsReport>({ coachRows: [], playerRows: [] });
+  const [npsSurveys, setNpsSurveys] = useState<CampaignNpsSurvey[]>([]);
   const [newPlayer, setNewPlayer] = useState({ name: "", email: "" });
   const [drafting, setDrafting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -60,14 +69,19 @@ export function AdminCampaignDetailPage() {
   }, [campaignId]);
 
   const loadCampaignDetail = useCallback(async () => {
-    const [nextCampaign, nextRows, nextAthletes] = await Promise.all([
-      api.getCampaign(campaignId),
-      api.getCampaignReadiness(campaignId),
-      api.listAthletes(),
-    ]);
+    const [nextCampaign, nextRows, nextAthletes, nextCoachProfiles, nextCampaignCoaches] =
+      await Promise.all([
+        api.getCampaign(campaignId),
+        api.getCampaignReadiness(campaignId),
+        api.listAthletes(),
+        api.listCoachProfiles(),
+        api.listCampaignCoaches(campaignId),
+      ]);
     setCampaign(nextCampaign);
     setRows(nextRows);
     setAthletes(nextAthletes);
+    setCoachProfiles(nextCoachProfiles);
+    setCampaignCoaches(nextCampaignCoaches);
     if (campaignCapabilities(nextCampaign).liveMatrix) {
       const [nextMatrixRows, nextAuditEvents] = await Promise.all([
         api.getCampaignMatrixStatus(campaignId),
@@ -80,9 +94,15 @@ export function AdminCampaignDetailPage() {
       setAuditEvents([]);
     }
     if (campaignCapabilities(nextCampaign).coachNps) {
-      setNpsReport(await api.getNpsReport(campaignId));
+      const [nextReport, nextSurveys] = await Promise.all([
+        api.getNpsReport(campaignId),
+        api.listNpsSurveys(campaignId),
+      ]);
+      setNpsReport(nextReport);
+      setNpsSurveys(nextSurveys);
     } else {
       setNpsReport({ coachRows: [], playerRows: [] });
+      setNpsSurveys([]);
     }
     void loadGrowthMatrixAdmin();
   }, [campaignId, loadGrowthMatrixAdmin]);
@@ -107,6 +127,8 @@ export function AdminCampaignDetailPage() {
   const pendingEvaluations = rows.filter((row) => row.evaluationStatus !== "submitted");
   const assignedAthleteIds = new Set(rows.map((row) => row.athleteId));
   const unassignedAthletes = athletes.filter((athlete) => !assignedAthleteIds.has(athlete.id));
+  const assignedCoachIds = new Set(campaignCoaches.map((coach) => coach.coachProfileId));
+  const unassignedCoaches = coachProfiles.filter((coach) => !assignedCoachIds.has(coach.id));
   const detailCaps = campaignCapabilities(campaign);
 
   useEffect(() => {
@@ -115,6 +137,13 @@ export function AdminCampaignDetailPage() {
     }
     setAssignment((current) => ({ ...current, athleteId: unassignedAthletes[0]?.id ?? "" }));
   }, [assignment.athleteId, unassignedAthletes]);
+
+  useEffect(() => {
+    if (coachAssignId || unassignedCoaches.length === 0) {
+      return;
+    }
+    setCoachAssignId(unassignedCoaches[0]?.id ?? "");
+  }, [coachAssignId, unassignedCoaches]);
 
   function handleWhoIsIncomplete() {
     setAssistantResponse(buildIncompletePlayersAnswer(rows));
@@ -235,6 +264,53 @@ export function AdminCampaignDetailPage() {
     }
   }
 
+  async function handleAssignCoach(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!coachAssignId) {
+      setMessage("Select a coach before assigning.");
+      return;
+    }
+    try {
+      await api.assignCampaignCoach({
+        campaignId,
+        coachProfileId: coachAssignId,
+      });
+      const assigned = coachProfiles.find((coach) => coach.id === coachAssignId);
+      setMessage(
+        `${assigned?.full_name || assigned?.email || "Coach"} assigned to ${campaign?.name ?? "campaign"}.`,
+      );
+      setCoachAssignId("");
+      await loadCampaignDetail();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not assign the coach.");
+    }
+  }
+
+  async function handleCreateAndAssignCoach(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newCoach.name.trim() || !newCoach.email.trim()) {
+      setMessage("New coaches need a name and a login email.");
+      return;
+    }
+    try {
+      const created = await api.createCoachProfile({
+        fullName: newCoach.name,
+        email: newCoach.email,
+      });
+      await api.assignCampaignCoach({
+        campaignId,
+        coachProfileId: created.id,
+      });
+      setMessage(
+        `${created.full_name ?? "Coach"} created and assigned to ${campaign?.name ?? "this campaign"}.`,
+      );
+      setNewCoach({ name: "", email: "" });
+      await loadCampaignDetail();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not add the coach.");
+    }
+  }
+
   async function handleSaveNpsSurvey(
     window: "mid_season" | "post_season",
     status: "open" | "closed",
@@ -252,7 +328,12 @@ export function AdminCampaignDetailPage() {
       createdBy: profile.id,
     });
     setMessage(`NPS survey ${status === "open" ? "opened" : "closed"}.`);
-    setNpsReport(await api.getNpsReport(campaignId));
+    const [nextReport, nextSurveys] = await Promise.all([
+      api.getNpsReport(campaignId),
+      api.listNpsSurveys(campaignId),
+    ]);
+    setNpsReport(nextReport);
+    setNpsSurveys(nextSurveys);
   }
 
   return (
@@ -389,6 +470,100 @@ export function AdminCampaignDetailPage() {
           Growth Matrix drafts remain hidden until the correct review/share steps happen.
         </p>
       </section>
+      <AdminRosterImportPanel
+        campaignId={campaignId}
+        athletes={athletes}
+        memberAthleteIds={assignedAthleteIds}
+        onImported={loadCampaignDetail}
+      />
+      <section className="card stack">
+        <div className="section-title">
+          <h2>Assign coaches</h2>
+          <Badge>{campaignCoaches.length} assigned</Badge>
+        </div>
+        {campaignCoaches.length > 0 ? (
+          <ul className="compact-list">
+            {campaignCoaches.map((coach) => (
+              <li key={coach.id}>
+                <strong>{coach.name}</strong>
+                <span>
+                  {coach.email} · {coach.coachRole.replaceAll("_", " ")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted">No coaches assigned yet.</p>
+        )}
+        {unassignedCoaches.length > 0 ? (
+          <form
+            className="grid cols-2 assignment-form"
+            onSubmit={(event) => void handleAssignCoach(event)}
+          >
+            <div className="field">
+              <label htmlFor="assign-coach">Coach</label>
+              <select
+                id="assign-coach"
+                value={coachAssignId}
+                onChange={(event) => setCoachAssignId(event.target.value)}
+              >
+                {unassignedCoaches.map((coach) => (
+                  <option key={coach.id} value={coach.id}>
+                    {coach.full_name || coach.preferred_name || coach.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field field-action">
+              <label aria-hidden="true">&nbsp;</label>
+              <button type="submit" className="btn primary">
+                Assign coach
+              </button>
+            </div>
+          </form>
+        ) : (
+          <p className="muted">All coach profiles are already assigned to this campaign.</p>
+        )}
+        <form
+          className="grid cols-3 assignment-form"
+          onSubmit={(event) => void handleCreateAndAssignCoach(event)}
+        >
+          <div className="field">
+            <label htmlFor="new-coach-name">New coach name</label>
+            <input
+              id="new-coach-name"
+              type="text"
+              value={newCoach.name}
+              onChange={(event) =>
+                setNewCoach((current) => ({ ...current, name: event.target.value }))
+              }
+              placeholder="Full name"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="new-coach-email">Coach login email</label>
+            <input
+              id="new-coach-email"
+              type="email"
+              value={newCoach.email}
+              onChange={(event) =>
+                setNewCoach((current) => ({ ...current, email: event.target.value }))
+              }
+              placeholder="coach@example.com"
+            />
+          </div>
+          <div className="field field-action">
+            <label aria-hidden="true">&nbsp;</label>
+            <button type="submit" className="btn">
+              Add and assign coach
+            </button>
+          </div>
+        </form>
+        <p className="muted">
+          Pilot uses flat coach role only. On Supabase, create the Auth user with{" "}
+          <code>role=coach</code> first if create-from-CRM is unavailable, then assign here.
+        </p>
+      </section>
       {detailCaps.growthMatrix ? (
         <AdminGrowthMatrixPanel
           briefing={briefing}
@@ -401,11 +576,13 @@ export function AdminCampaignDetailPage() {
       ) : null}
       {detailCaps.coachNps ? (
         <AdminNpsPanel
+          campaignId={campaignId}
           report={npsReport}
-          onOpenMid={() => void handleSaveNpsSurvey("mid_season", "open")}
+          surveys={npsSurveys}
           onOpenPost={() => void handleSaveNpsSurvey("post_season", "open")}
-          onCloseMid={() => void handleSaveNpsSurvey("mid_season", "closed")}
           onClosePost={() => void handleSaveNpsSurvey("post_season", "closed")}
+          onOpenMid={() => void handleSaveNpsSurvey("mid_season", "open")}
+          onCloseMid={() => void handleSaveNpsSurvey("mid_season", "closed")}
         />
       ) : null}
       <section className="card stack assistant-card">

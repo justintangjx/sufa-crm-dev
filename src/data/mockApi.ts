@@ -42,13 +42,17 @@ import type {
   AdminStats,
   Api,
   AthletePatch,
+  CampaignCoachAssignment,
+  CampaignCoachView,
   CampaignMatrixStatusRow,
   CampaignOperatingSummary,
   CampaignReadinessEntry,
+  CampaignRosterImportInput,
   CampaignWithMembership,
   ChangeRequestView,
   CoachMatrixInput,
   CreateAthleteInput,
+  CreateCoachProfileInput,
   EvaluationInput,
   GrowthReviewInput,
   GrowthReviewWithDetails,
@@ -60,9 +64,11 @@ import type {
   NpsTask,
   NpsTaskTarget,
   PlayerMatrixInput,
+  RosterImportCommitResult,
   SignInResult,
   TryoutBriefingInput,
 } from "./types";
+import { planRosterImport } from "../lib/rosterImport";
 import { athleteFieldsFromCreateInput, normalizeEmail } from "./payloads/athlete";
 import { briefingFieldsFromInput } from "./payloads/briefing";
 import { displayName } from "./payloads/display";
@@ -298,7 +304,7 @@ function buildMatrixStatusRows(campaignId: string): CampaignMatrixStatusRow[] {
         coachAssessments: [...latestPerCoach.values()],
         playerStatus: playerSubmission?.status ?? "not_started",
         playerSubmittedCount: playerRows.filter((row) => row.status === "submitted").length,
-        submittedCoachCount: new Set(
+        distinctSubmittedCoachCount: new Set(
           coachRows
             .filter((assessment) => assessment.status === "submitted")
             .map((assessment) => assessment.coach_profile_id),
@@ -517,6 +523,58 @@ export const mockApi: Api = {
     return created;
   },
 
+  async commitCampaignRosterImport(
+    input: CampaignRosterImportInput,
+  ): Promise<RosterImportCommitResult> {
+    const data = getData();
+    const memberAthleteIds = new Set(
+      data.campaignMembers
+        .filter((member) => member.campaign_id === input.campaignId)
+        .map((member) => member.athlete_id),
+    );
+    const plan = planRosterImport({
+      campaignId: input.campaignId,
+      rows: input.rows,
+      athletes: data.athletes,
+      memberAthleteIds,
+    });
+
+    let createdAthletes = 0;
+    let assignedMembers = 0;
+    // Sequential on purpose: each create must land before later rows can match by email.
+    for (const action of plan.rows) {
+      if (action.kind === "create_and_assign") {
+        // eslint-disable-next-line no-await-in-loop -- roster rows must commit in order
+        const created = await mockApi.createAthlete(action.fields);
+        // eslint-disable-next-line no-await-in-loop -- roster rows must commit in order
+        await mockApi.assignCampaignMember({
+          campaignId: input.campaignId,
+          athleteId: created.id,
+          status: action.memberStatus,
+        });
+        createdAthletes += 1;
+        assignedMembers += 1;
+        memberAthleteIds.add(created.id);
+      } else if (action.kind === "assign_only") {
+        // eslint-disable-next-line no-await-in-loop -- roster rows must commit in order
+        await mockApi.assignCampaignMember({
+          campaignId: input.campaignId,
+          athleteId: action.athleteId,
+          status: action.memberStatus,
+        });
+        assignedMembers += 1;
+      }
+    }
+
+    return {
+      plan,
+      createdAthletes,
+      assignedMembers,
+      skipped: plan.counts.skip,
+      errors: plan.counts.error,
+    };
+  },
+
   async updateAthleteAsAdmin(athleteId: string, patch: AdminAthletePatch) {
     const data = getData();
     const athlete = data.athletes.find((row) => row.id === athleteId);
@@ -606,6 +664,82 @@ export const mockApi: Api = {
     saveData(data);
   },
 
+  async listCoachProfiles() {
+    return getData().profiles.filter((profile) => profile.role === "coach");
+  },
+
+  async listCampaignCoaches(campaignId: string): Promise<CampaignCoachView[]> {
+    const data = getData();
+    return data.campaignCoaches
+      .filter((row) => row.campaign_id === campaignId)
+      .map((row) => {
+        const profile = findProfile(row.coach_profile_id);
+        return {
+          id: row.id,
+          campaignId: row.campaign_id,
+          coachProfileId: row.coach_profile_id,
+          coachRole: row.coach_role,
+          email: profile?.email ?? "",
+          name: profile ? profileName(row.coach_profile_id) : row.coach_profile_id,
+        };
+      });
+  },
+
+  async assignCampaignCoach(input: CampaignCoachAssignment) {
+    const data = getData();
+    const profile = findProfile(input.coachProfileId);
+    if (!profile || profile.role !== "coach") {
+      throw new Error("Coach profile not found");
+    }
+    const existing = data.campaignCoaches.find(
+      (row) =>
+        row.campaign_id === input.campaignId && row.coach_profile_id === input.coachProfileId,
+    );
+    if (existing) {
+      existing.coach_role = "coach";
+      saveData(data);
+      return;
+    }
+    data.campaignCoaches.push({
+      id: generateId("cc"),
+      campaign_id: input.campaignId,
+      coach_profile_id: input.coachProfileId,
+      coach_role: "coach",
+      created_at: now(),
+    });
+    saveData(data);
+  },
+
+  async createCoachProfile(input: CreateCoachProfileInput) {
+    const data = getData();
+    const email = normalizeEmail(input.email);
+    if (!email) {
+      throw new Error("Coach email is required");
+    }
+    if (!input.fullName.trim()) {
+      throw new Error("Coach name is required");
+    }
+    const emailTaken =
+      data.profiles.some((profile) => profile.email.toLowerCase() === email) ||
+      data.athletes.some((athlete) => athlete.email?.toLowerCase() === email);
+    if (emailTaken) {
+      throw new Error("An account with this email already exists");
+    }
+    const timestamp = now();
+    const created = {
+      id: generateId("p"),
+      email,
+      full_name: input.fullName.trim(),
+      preferred_name: null,
+      role: "coach" as const,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    data.profiles.push(created);
+    saveData(data);
+    return created;
+  },
+
   async getCampaignReadiness(campaignId: string): Promise<CampaignReadinessEntry[]> {
     const data = getData();
     return data.campaignMembers
@@ -644,7 +778,7 @@ export const mockApi: Api = {
       playerMatrixSubmittedCount: matrixRows.filter((row) => row.playerStatus === "submitted")
         .length,
       coachMatrixSubmittedCount: matrixRows.reduce(
-        (total, row) => total + row.submittedCoachCount,
+        (total, row) => total + row.distinctSubmittedCoachCount,
         0,
       ),
       openNpsSurveyCount: surveys.filter((survey) => survey.status === "open").length,

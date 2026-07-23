@@ -1,14 +1,13 @@
-# Google Sheets Campaign Snapshots
+# Google Sheets campaign snapshots
 
-This document is the implementation context for publishing controlled SUFA CRM campaign
-snapshots to Google Sheets through n8n. It supplements `prd.md`; where requirements
-conflict, `prd.md` remains canonical.
+Implementation context for publishing SUFA CRM campaign snapshots to Google Sheets
+through n8n. This supplements `prd.md`. Where requirements conflict, `prd.md` remains
+canonical.
 
-## Why This Exists
+## Why this exists
 
-Admins sometimes need to share campaign information with people who should not receive
-CRM or database access. Google Sheets is a familiar read-only surface for checking and
-using a bounded dataset.
+Admins sometimes need to share campaign information with people who should not get CRM
+or database access. Google Sheets is a familiar read-only spreadsheet for a bounded dataset.
 
 The spreadsheet is a publication, not another database:
 
@@ -18,13 +17,13 @@ The spreadsheet is a publication, not another database:
 - Changes made directly in Google Sheets never sync back to the CRM.
 - Readers receive only the fields allowed by the fixed export policy.
 
-## V1 Decisions
+## V1 decisions
 
 - Only authenticated admins can publish snapshots.
 - V1 supports campaign snapshots only.
 - An admin must preview and explicitly confirm every publication.
 - Each campaign has one stable spreadsheet. Later publications refresh that file.
-- V1 uses one fixed operational column preset; admins cannot select arbitrary fields.
+- V1 uses one fixed operational column preset. Admins cannot select arbitrary fields.
 - Readers must be named Google accounts in configured SUFA email domains.
 - A dedicated SUFA-managed Google account owns every spreadsheet.
 - Each refresh makes the Google reader list exactly match the confirmed CRM recipient
@@ -37,12 +36,12 @@ The spreadsheet is a publication, not another database:
 Public-link sharing, all-player exports, scheduled refreshes, editable recipient access,
 custom columns, and Google-to-Supabase synchronization are out of scope for V1.
 
-## Export Policy
+## Export policy
 
 The export mapper must construct a new allowlisted row object. It must not serialize an
 `Athlete`, database result, or arbitrary object and then remove fields.
 
-### Snapshot Columns
+### Snapshot columns
 
 Use this exact column order and `schemaVersion` value:
 
@@ -82,10 +81,10 @@ Snapshot published at
 
 `missingRequiredFields` is a comma-separated list of labels returned by the existing
 profile-completion logic. `passportReadiness` is the derived status only, never the
-expiry date. Timestamps use ISO 8601 UTC values in the integration payload; Google may
+expiry date. Timestamps use ISO 8601 UTC values in the integration payload. Google may
 format them for display without changing their values.
 
-### Prohibited Data
+### Prohibited data
 
 The mapper, Edge Function payload, n8n execution data, fixtures, and spreadsheet must
 not contain:
@@ -103,7 +102,7 @@ not contain:
 `athleteId` is the CRM domain identifier. Do not export `profile_id` or Supabase Auth
 user IDs.
 
-## User Experience
+## User experience
 
 Implement the workflow at `/admin/exports`.
 
@@ -124,7 +123,7 @@ The page also lists prior publication attempts newest first with campaign, reque
 status, row count, recipients, timestamps, and link when available. Do not display raw
 n8n or Google error bodies.
 
-## System Flow
+## System flow
 
 ```txt
 Admin preview
@@ -145,14 +144,14 @@ Admin preview
   -> React displays the audit result
 ```
 
-The publication timestamp is captured once by the Edge Function and used for every row
-in that attempt. The latest successful run for the campaign supplies the existing
+The Edge Function captures the publication timestamp once and uses it for every row in
+that attempt. The latest successful run for the campaign supplies the existing
 spreadsheet ID to n8n. A failed run never replaces that successful sheet identity.
 
-## Application Contracts
+## Application contracts
 
-Add these shared data-layer types. Exact file placement should follow the existing
-`src/data/types.ts` and `src/types/database.ts` boundary.
+Add these shared data-layer types. Place them using the existing `src/data/types.ts` and
+`src/types/database.ts` boundary.
 
 ```ts
 export type GoogleSheetExportStatus = "pending" | "succeeded" | "failed";
@@ -207,7 +206,7 @@ runs in mock storage, reuse a deterministic spreadsheet ID per campaign, and ret
 fake `https://docs.google.com/spreadsheets/d/...` URL. Tests must not require n8n,
 Google, or network access.
 
-## Database And RLS
+## Database and RLS
 
 Add `google_sheet_export_runs` in a new migration. Use `jsonb` for the normalized
 recipient array and constrain it to an array. Do not store the exported rows.
@@ -247,7 +246,7 @@ Enable RLS with these boundaries:
 
 Do not loosen existing athlete, campaign, profile, or change-request policies.
 
-## Edge Function Contract
+## Edge function contract
 
 Create a Supabase Edge Function named `publish-campaign-sheet`.
 
@@ -304,7 +303,7 @@ retry it.
 Retrying from the UI creates a new run and a new request ID. Repeated transport delivery
 of the same run ID is idempotent in n8n.
 
-## n8n Contract
+## n8n contract
 
 The Edge Function calls the configured n8n webhook with:
 
@@ -336,7 +335,7 @@ Content-Type: application/json
 }
 ```
 
-The abbreviated row above illustrates the envelope only; production rows must match the
+The abbreviated row above illustrates the envelope only. Production rows must match the
 complete versioned schema.
 
 n8n must:
@@ -346,7 +345,7 @@ n8n must:
 3. Look up `requestId` in persistent workflow data or a dedicated n8n data store.
 4. Return the stored successful response without repeating side effects when the same
    request ID is received again.
-5. Create a spreadsheet when `existingSpreadsheetId` is null; otherwise verify and
+5. Create a spreadsheet when `existingSpreadsheetId` is null. Otherwise verify and
    refresh that file.
 6. Replace the complete `Snapshot` tab, rather than appending rows.
 7. Maintain an `About` tab with campaign name, publication timestamp, schema version,
@@ -377,7 +376,7 @@ Success response:
 The response is successful only after data replacement and permission reconciliation
 both complete. Partial permission changes are failures.
 
-## Secrets And Configuration
+## Secrets and configuration
 
 Configure these only as Supabase Edge Function secrets:
 
@@ -393,7 +392,7 @@ values to `.env.example` as `VITE_*` variables or expose them to the browser.
 Google credentials belong in n8n's credential store. The Google identity must be a
 dedicated SUFA-managed account, not an individual admin account.
 
-## Failure Behaviour
+## Failure behaviour
 
 | Failure                                      | Required behaviour                                                                                     |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -413,36 +412,36 @@ A downstream failure may have changed Google state before failing. The retry wor
 must therefore refresh the full sheet and reconcile the full permission list, making
 the operation convergent.
 
-## Implementation Slices
+## Implementation slices
 
 Complete and verify one slice before starting the next.
 
-1. **Export mapping and policy evals**
+1. Export mapping and policy evals
    - Add the versioned row mapper, headers, recipient normalization, and prohibited-field
      tests.
-2. **Migration, types, and RLS**
+2. Migration, types, and RLS
    - Add the export-run table, indexes, admin-select policy, domain types, and RLS tests.
-3. **Mock and Supabase API contracts**
+3. Mock and Supabase API contracts
    - Add preview, publish, and history methods while keeping offline tests deterministic.
-4. **Edge Function**
+4. Edge Function
    - Add authorization, server-side queries and mapping, audit transitions, hashing,
      webhook call, and safe errors.
-5. **n8n workflow**
+5. n8n workflow
    - Add schema validation, idempotency storage, sheet create/replace, `About` tab, and
      exact reader reconciliation.
-6. **Admin export UI**
+6. Admin export UI
    - Replace the placeholder with preview, recipient validation, confirmation, history,
      stable link, failure state, and retry.
-7. **Integration and E2E verification**
+7. Integration and E2E verification
    - Cover role guards, successful publication, refresh, failures, and audit history.
-8. **Pilot rollout**
+8. Pilot rollout
    - Deploy to staging, publish a non-sensitive test campaign, verify permissions, then
      run one limited real or simulated campaign.
 
 Keep the role-page refactor in `docs/context.md` in mind. If `src/App.tsx` has not yet
 been split when this work starts, coordinate ownership before editing it.
 
-## Export Evals
+## Export evals
 
 Use table-driven tests, following the eval style in `prd.md`. Suggested location:
 
@@ -494,10 +493,10 @@ Required evals:
 - An empty campaign publishes a valid header-only snapshot with row count zero.
 - The mock and server implementations conform to the same public contract.
 
-Fixtures and recorded webhook payloads are subject to the same prohibited-field checks
-as production mapping code.
+Apply the same prohibited-field checks to fixtures and recorded webhook payloads as to
+production mapping code.
 
-## Coding-Agent Loop
+## Coding-agent loop
 
 For every implementation slice:
 
@@ -518,7 +517,7 @@ Read prd.md, AGENTS.md, docs/context.md, and this document
 Do not move to the next slice while focused tests fail. If external staging verification
 is unavailable, report that gap explicitly rather than replacing it with a mock result.
 
-## Production Feedback Loop
+## Production feedback loop
 
 For each pilot publication:
 
@@ -548,9 +547,9 @@ Track:
 - Whether recipients still request direct database or CRM access.
 
 Review pilot results after each campaign. Add a field only when there is a documented
-operational need and a privacy review; remove fields that are not being used.
+operational need and a privacy review. Remove fields that are not being used.
 
-## Acceptance Gates
+## Acceptance gates
 
 Implementation is complete only when:
 
