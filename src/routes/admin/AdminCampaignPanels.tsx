@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { Badge, StatCard } from "../../components/shell/PagePrimitives";
 import type { CampaignMatrixStatusRow, GrowthReviewWithDetails, NpsReport } from "../../data/types";
+import {
+  buildNpsAdminReadiness,
+  formatNpsCloseConfirm,
+  formatNpsOpenConfirm,
+  npsPrerequisitesMet,
+} from "../../lib/adminCampaignOps";
 import { buildNpsAggregateSnapshot, U24_PILOT_NPS_POLICY } from "../../lib/npsAggregateSnapshot";
 import { canShareGrowthReview, getQuadrantInfo } from "../../lib/playerGrowth";
 import { growthStatusTone } from "../player/PlayerCampaignPanels";
@@ -187,6 +193,8 @@ export function AdminLiveMatrixPanel({
 
 export function AdminNpsPanel({
   campaignId,
+  rosterCount,
+  coachCount,
   report,
   surveys,
   onOpenPost,
@@ -195,6 +203,8 @@ export function AdminNpsPanel({
   onCloseMid,
 }: {
   campaignId: string;
+  rosterCount: number;
+  coachCount: number;
   report: NpsReport;
   surveys: CampaignNpsSurvey[];
   onOpenPost: () => void;
@@ -204,32 +214,57 @@ export function AdminNpsPanel({
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const snapshot = buildNpsAggregateSnapshot(campaignId, report, surveys);
+  const readiness = buildNpsAdminReadiness({
+    rosterCount,
+    coachCount,
+    npsEnabled: true,
+    report,
+    surveys,
+  });
   const post = surveys.find((survey) => survey.survey_window === "post_season");
   const mid = surveys.find((survey) => survey.survey_window === "mid_season");
   const postOpen = post?.status === "open";
   const postCompletion = snapshot.completion.find((row) => row.window === "post_season");
+  const canOpen = npsPrerequisitesMet(readiness) && !postOpen;
+
+  function handleOpenPost() {
+    if (!window.confirm(formatNpsOpenConfirm(readiness))) {
+      return;
+    }
+    onOpenPost();
+  }
+
+  function handleClosePost() {
+    if (!window.confirm(formatNpsCloseConfirm(readiness, snapshot))) {
+      return;
+    }
+    onClosePost();
+  }
 
   return (
-    <section className="card stack">
+    <section id="nps" className="card stack campaign-nps-panel">
       <div className="section-title">
         <h2>Campaign NPS</h2>
         <Badge tone={postOpen ? "ok" : "warn"}>
           {postOpen ? "end survey open" : "end survey closed"}
         </Badge>
       </div>
-      <p>
-        Pilot primary window is{" "}
-        <strong>{U24_PILOT_NPS_POLICY.primaryWindow.replace("_", "-")}</strong>. Open this once at
-        campaign end (replaces Google Forms). Mid-season stays optional.
-      </p>
+      <p className="nps-readiness-strip">{readiness.stripLabel}</p>
+      <p className="muted">{readiness.openEffectCopy}</p>
+      {readiness.responseProgressLabel ? (
+        <p className="muted">{readiness.responseProgressLabel}</p>
+      ) : null}
       <div className="btn-row">
-        <button type="button" className="btn primary" onClick={onOpenPost} disabled={postOpen}>
+        <button type="button" className="btn primary" onClick={handleOpenPost} disabled={!canOpen}>
           Open end-of-campaign NPS
         </button>
-        <button type="button" className="btn" onClick={onClosePost} disabled={!postOpen}>
+        <button type="button" className="btn" onClick={handleClosePost} disabled={!postOpen}>
           Close end-of-campaign NPS
         </button>
       </div>
+      {!npsPrerequisitesMet(readiness) ? (
+        <p className="alert warn">Import roster players and assign coaches before opening NPS.</p>
+      ) : null}
       {postCompletion ? (
         <div className="grid cols-2">
           <StatCard

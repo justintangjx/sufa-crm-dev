@@ -325,6 +325,55 @@ a:hover {
 .ops-footer-grid {
   margin-top: 16px;
 }
+.campaign-dashboard-list {
+  display: grid;
+  gap: 16px;
+}
+.campaign-dashboard-card h2 {
+  font-size: 24px;
+}
+.campaign-dashboard-card h3 {
+  font-size: 15px;
+}
+.campaign-dashboard-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.campaign-dashboard-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.page-message {
+  margin-bottom: 16px;
+}
+.optional-panel > summary {
+  cursor: pointer;
+  font-family: var(--display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-h);
+  list-style: none;
+}
+.optional-panel > summary::-webkit-details-marker {
+  display: none;
+}
+.coach-auth-checklist ol {
+  margin: 0;
+  padding-left: 20px;
+}
+.coach-auth-checklist li + li {
+  margin-top: 6px;
+}
+.nps-readiness-strip {
+  font-family: var(--display);
+  font-size: 15px;
+  color: var(--text-h);
+}
 .checklist,
 .campaign-strip,
 .action-list,
@@ -993,7 +1042,8 @@ a:focus-visible {
     justify-content: flex-start;
   }
   .readiness-hero,
-  .control-room-head {
+  .control-room-head,
+  .campaign-dashboard-head {
     flex-direction: column;
   }
   .readiness-score {

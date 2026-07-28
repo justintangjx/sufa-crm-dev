@@ -41,8 +41,9 @@ describe("App routing", () => {
 
     expect(await screen.findByRole("heading", { name: /admin dashboard/i })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: /u24 worlds 2026/i })).toBeInTheDocument();
-    expect(await screen.findByText(/players travel-ready/i)).toBeInTheDocument();
-    expect(screen.getByText(/next admin actions/i)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/next admin actions/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/players travel-ready/i)).not.toBeInTheDocument();
   });
 
   it("redirects a player away from admin routes", async () => {
@@ -194,39 +195,18 @@ describe("App routing", () => {
     expect(playerFlow?.reviews[0]?.rationale).toContain("Ben is still building");
   });
 
-  it("lets an admin draft campaign reminders without sending them", async () => {
-    const user = userEvent.setup();
+  it("shows pilot campaign workspace without readiness or assistant panels", async () => {
     await api.signIn("admin@sufa.test");
 
-    render(<TestApp initialEntries={["/admin/campaigns/c-sea"]} />);
+    render(<TestApp initialEntries={["/admin/campaigns/c-u24"]} />);
 
-    expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: /u24 live evaluation matrix/i }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /^coach nps$/i })).not.toBeInTheDocument();
-    expect((await screen.findAllByText(/passport expiry/i)).length).toBeGreaterThan(0);
-
-    await user.click(screen.getByRole("button", { name: /who is incomplete/i }));
-    expect(
-      await screen.findByText(/1 player is missing required profile details/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Ben: Date of birth/i)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /are we sportsync-ready/i }));
-    expect(await screen.findByText(/2 of 3 players are profile-ready/i)).toBeInTheDocument();
-
-    await user.click(await screen.findByRole("button", { name: /draft reminders \(1\)/i }));
-
-    expect(await screen.findByText(/1 reminder draft created for review/i)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /reminder draft preview/i })).toBeInTheDocument();
-    expect(screen.getByText(/Hi Ben,/)).toBeInTheDocument();
-    expect(screen.getAllByText(/Nothing has been sent/i).length).toBeGreaterThan(0);
-
-    const drafts = await api.listAssistantDrafts("p-admin");
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]?.status).toBe("draft");
-    expect(drafts[0]?.content).toContain("Passport expiry");
+    expect(await screen.findByRole("heading", { name: /u24 worlds 2026/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /import roster csv/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /campaign roster/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /assign coaches/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /campaign nps/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /readiness summary/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^assistant$/i })).not.toBeInTheDocument();
   });
 
   it("lets an admin create a campaign from the campaign workspace", async () => {
@@ -258,7 +238,8 @@ describe("App routing", () => {
     render(<TestApp initialEntries={["/admin/campaigns/c-sea"]} />);
 
     expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText(/^player$/i), "a-derrick");
+    await user.click(screen.getByText(/add individual player \(optional\)/i));
+    await user.selectOptions(screen.getByLabelText(/existing player/i), "a-derrick");
     await user.selectOptions(screen.getByLabelText(/assignment status/i), "registered");
     await user.click(screen.getByRole("button", { name: /assign player/i }));
 

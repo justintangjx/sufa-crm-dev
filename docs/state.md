@@ -51,6 +51,12 @@ Growth Matrix / coach-LLM schema before FULL_GO (hide via flags + capabilities o
 - Soft coach matrix cadence: `matrixSoftLimit.ts` (nudge at 0, confirm at/over 2 submitted).
 - U24 capability hide: Growth Matrix and legacy Evaluate off when live matrix is on
   (`campaignCapabilities.ts`).
+- Admin dashboard lists every campaign with per-campaign next actions (roster, coaches,
+  NPS only); review queue stays in the header.
+- Campaign detail (pilot): roster CSV import + roster table, collapsed individual-player
+  add, coach Auth-first checklist on Supabase, NPS panel (`#nps`) above live matrix with
+  readiness strip and open/close confirms; ops helpers in `src/lib/adminCampaignOps.ts`
+  (Telegram-bot friendly).
 - Admin coach assignment on campaign detail (`listCoachProfiles` /
   `listCampaignCoaches` / `assignCampaignCoach` / mock `createCoachProfile`).
 - Campaign roster CSV import: `planRosterImport` + preview/commit on campaign detail
@@ -73,6 +79,8 @@ Growth Matrix / coach-LLM schema before FULL_GO (hide via flags + capabilities o
 - Supabase cannot create Auth coach users from the CRM client; create Auth user with
   `role=coach` then assign on campaign detail.
 - NPS Telegram delivery not wired.
+- Apply `20260723100000_admin_roster_coach_grants.sql` if admin coach assign / athlete
+  create returns permission denied (missing INSERT grants on `campaign_coaches` / `athletes`).
 
 ## Deployment snapshot
 

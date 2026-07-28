@@ -2,6 +2,7 @@ import { useState, type ChangeEvent } from "react";
 import { Badge } from "../../components/shell/PagePrimitives";
 import { api } from "../../data";
 import type { RosterImportPlan } from "../../data/types";
+import { humanizeRosterImportAction } from "../../lib/adminCampaignOps";
 import {
   parseRosterCsv,
   planRosterImport,
@@ -128,6 +129,9 @@ export function AdminRosterImportPanel({
           {committing ? "Committing..." : "Commit import"}
         </button>
       </div>
+      {!plan ? (
+        <p className="muted">Choose a CSV file to preview changes before committing.</p>
+      ) : null}
       {headerError ? <p className="alert warn">{headerError}</p> : null}
       {message ? <p className="alert ok">{message}</p> : null}
       {plan ? (
@@ -169,7 +173,7 @@ export function AdminRosterImportPanel({
                 {plan.rows.map((row) => (
                   <tr key={`${row.rowNumber}-${row.kind}-${row.email ?? ""}`}>
                     <td>{row.rowNumber}</td>
-                    <td>{row.kind}</td>
+                    <td>{humanizeRosterImportAction(row.kind)}</td>
                     <td>{row.email ?? "—"}</td>
                     <td>
                       {row.kind === "create_and_assign"
