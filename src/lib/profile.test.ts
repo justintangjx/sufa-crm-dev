@@ -3,8 +3,8 @@ import { makeAthlete } from "../test/factories";
 import {
   getMissingAthleteFields,
   getProfileCompletion,
+  getRequiredFields,
   isProfileComplete,
-  REQUIRED_FIELDS,
 } from "./profile";
 
 describe("getMissingAthleteFields", () => {
@@ -59,9 +59,15 @@ describe("getProfileCompletion", () => {
   });
 
   it("reflects partial completion", () => {
-    const athlete = makeAthlete({ passport_expiry: null });
-    const expected = Math.round(((REQUIRED_FIELDS.length - 1) / REQUIRED_FIELDS.length) * 100);
+    const athlete = makeAthlete({ phone: null });
+    const fields = getRequiredFields();
+    const expected = Math.round(((fields.length - 1) / fields.length) * 100);
     expect(getProfileCompletion(athlete)).toBe(expected);
+  });
+
+  it("omits passport from required fields when travel readiness is off", () => {
+    const fields = getRequiredFields().map((field) => field.field);
+    expect(fields).not.toContain("passport_expiry");
   });
 });
 

@@ -5,6 +5,7 @@ import { CheckboxField, TextField } from "../../components/shell/FormFields";
 import { Badge, PageHead } from "../../components/shell/PagePrimitives";
 import { api } from "../../data";
 import { getProfileCompletion, getMissingAthleteFields } from "../../lib/profile";
+import { enableTravelReadiness } from "../../lib/env";
 import type { Athlete } from "../../types/database";
 import {
   emptyPlayerProfileForm,
@@ -145,18 +146,20 @@ export function PlayerProfilePage() {
             />
           </div>
         </section>
-        <section className="card">
-          <h2>Travel readiness</h2>
-          <div className="grid cols-2">
-            <TextField
-              label="Passport expiry"
-              type="date"
-              value={form.passport_expiry}
-              onChange={(value) => updateField("passport_expiry", value)}
-              required
-            />
-          </div>
-        </section>
+        {enableTravelReadiness ? (
+          <section className="card">
+            <h2>Travel readiness</h2>
+            <div className="grid cols-2">
+              <TextField
+                label="Passport expiry"
+                type="date"
+                value={form.passport_expiry}
+                onChange={(value) => updateField("passport_expiry", value)}
+                required
+              />
+            </div>
+          </section>
+        ) : null}
         <section className="card">
           <h2>Consent</h2>
           <div className="stack">

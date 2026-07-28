@@ -55,6 +55,9 @@ export const enableCampaignEvaluationMatrix = useMockBackend || forceCampaignEva
 
 export const enableCampaignNps = useMockBackend || forceCampaignNps;
 
+// Travel/passport readiness is post-pilot; off by default on Supabase and in tests.
+export const enableTravelReadiness = import.meta.env.VITE_ENABLE_TRAVEL_READINESS === "true";
+
 export const appUrl =
   (import.meta.env.VITE_APP_URL as string | undefined) ??
   (typeof window === "undefined" ? "http://localhost:5173" : window.location.origin);

@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, resetData } from "./data";
 import { TestApp } from "./routes";
 
@@ -81,12 +81,11 @@ describe("App routing", () => {
     render(<TestApp initialEntries={["/player/profile"]} />);
 
     expect(await screen.findByRole("heading", { name: /player profile/i })).toBeInTheDocument();
-    expect(await screen.findByText(/29%/)).toBeInTheDocument();
+    expect(await screen.findByText(/33%/)).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/date of birth/i), "1998-02-14");
     await user.type(screen.getByLabelText(/emergency contact name/i), "Mina Ong");
     await user.type(screen.getByLabelText(/emergency contact phone/i), "+65 9888 0000");
-    await user.type(screen.getByLabelText(/passport expiry/i), "2031-03-01");
     await user.click(screen.getByLabelText(/using my profile data for campaign administration/i));
     await user.click(screen.getByRole("button", { name: /save profile/i }));
 
@@ -107,7 +106,6 @@ describe("App routing", () => {
         "date_of_birth",
         "emergency_contact_name",
         "emergency_contact_phone",
-        "passport_expiry",
         "data_sharing_consent",
       ]),
     );
@@ -122,7 +120,7 @@ describe("App routing", () => {
     expect(
       await screen.findByRole("heading", { name: /player campaign hub/i }),
     ).toBeInTheDocument();
-    expect(await screen.findByText(/7 items are blocking campaign readiness/i)).toBeInTheDocument();
+    expect(await screen.findByText(/6 items are blocking campaign readiness/i)).toBeInTheDocument();
 
     const athlete = await api.getAthleteForProfile("p-derrick");
     expect(athlete?.legal_name).toBeNull();
@@ -195,6 +193,24 @@ describe("App routing", () => {
     expect(playerFlow?.reviews[0]?.rationale).toContain("Ben is still building");
   });
 
+  it("lets an admin remove a coach assignment and reassign", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await api.signIn("admin@sufa.test");
+
+    render(<TestApp initialEntries={["/admin/campaigns/c-u24"]} />);
+
+    expect(await screen.findByRole("heading", { name: /u24 worlds 2026/i })).toBeInTheDocument();
+    const removeCoach = within(
+      document.querySelector(".coach-assignment-list") as HTMLElement,
+    ).getAllByRole("button", { name: /^remove$/i })[0];
+    await user.click(removeCoach!);
+
+    expect(await screen.findByText(/removed from u24 worlds 2026/i)).toBeInTheDocument();
+    const coaches = await api.listCampaignCoaches("c-u24");
+    expect(coaches.length).toBeLessThan(2);
+  });
+
   it("shows pilot campaign workspace without readiness or assistant panels", async () => {
     await api.signIn("admin@sufa.test");
 
@@ -238,7 +254,7 @@ describe("App routing", () => {
     render(<TestApp initialEntries={["/admin/campaigns/c-sea"]} />);
 
     expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
-    await user.click(screen.getByText(/add individual player \(optional\)/i));
+    await user.click(screen.getByRole("button", { name: /add one player manually/i }));
     await user.selectOptions(screen.getByLabelText(/existing player/i), "a-derrick");
     await user.selectOptions(screen.getByLabelText(/assignment status/i), "registered");
     await user.click(screen.getByRole("button", { name: /assign player/i }));

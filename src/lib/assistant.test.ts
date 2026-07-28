@@ -42,13 +42,13 @@ describe("draftPlayerReminder", () => {
   it("lists outstanding fields and includes campaign + due date", () => {
     const text = draftPlayerReminder({
       playerName: "Jordan",
-      missingFields: getMissingAthleteFields(makeAthlete({ passport_expiry: null })),
+      missingFields: getMissingAthleteFields(makeAthlete({ phone: null })),
       campaignName: "SEA Games 2026",
       dueDate: "2026-05-01",
     });
     expect(text).toContain("Hi Jordan,");
     expect(text).toContain("SEA Games 2026");
-    expect(text).toContain("- Passport expiry");
+    expect(text).toContain("- Phone number");
     expect(text).toContain("2026-05-01");
   });
 

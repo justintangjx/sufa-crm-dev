@@ -53,10 +53,13 @@ Growth Matrix / coach-LLM schema before FULL_GO (hide via flags + capabilities o
   (`campaignCapabilities.ts`).
 - Admin dashboard lists every campaign with per-campaign next actions (roster, coaches,
   NPS only); review queue stays in the header.
-- Campaign detail (pilot): roster CSV import + roster table, collapsed individual-player
-  add, coach Auth-first checklist on Supabase, NPS panel (`#nps`) above live matrix with
-  readiness strip and open/close confirms; ops helpers in `src/lib/adminCampaignOps.ts`
-  (Telegram-bot friendly).
+- Pilot profile scope: passport/travel fields hidden unless `VITE_ENABLE_TRAVEL_READINESS=true`
+  (default off); admin Players table drops passport column.
+- Admin can remove campaign coach assignments (`unassignCampaignCoach`).
+- Admin can remove players from a campaign roster (`unassignCampaignMember`); pending NPS
+  assignments with no responses are dropped on unassign; list/submit NPS gates on active membership.
+- Campaign detail (pilot): roster CSV, roster table, manual add toggle, coach Auth checklist,
+  NPS `#nps` panel; ops in `src/lib/adminCampaignOps.ts` (Telegram-bot friendly).
 - Admin coach assignment on campaign detail (`listCoachProfiles` /
   `listCampaignCoaches` / `assignCampaignCoach` / mock `createCoachProfile`).
 - Campaign roster CSV import: `planRosterImport` + preview/commit on campaign detail
@@ -80,7 +83,7 @@ Growth Matrix / coach-LLM schema before FULL_GO (hide via flags + capabilities o
   `role=coach` then assign on campaign detail.
 - NPS Telegram delivery not wired.
 - Apply `20260723100000_admin_roster_coach_grants.sql` if admin coach assign / athlete
-  create returns permission denied (missing INSERT grants on `campaign_coaches` / `athletes`).
+  create / roster remove / NPS assignment cleanup returns permission denied.
 
 ## Deployment snapshot
 

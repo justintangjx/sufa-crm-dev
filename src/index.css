@@ -362,6 +362,54 @@ a:hover {
 .optional-panel > summary::-webkit-details-marker {
   display: none;
 }
+.optional-panel-trigger {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.optional-panel-trigger:hover .optional-panel-chevron {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.optional-panel-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-h);
+}
+.optional-panel-label {
+  display: grid;
+  gap: 4px;
+}
+.optional-panel-body {
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.coach-assignment-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.coach-assignment-list li > div {
+  display: grid;
+  gap: 2px;
+}
 .coach-auth-checklist ol {
   margin: 0;
   padding-left: 20px;

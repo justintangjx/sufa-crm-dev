@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { TextField } from "../../components/shell/FormFields";
 import { Badge, PageHead } from "../../components/shell/PagePrimitives";
 import { api } from "../../data";
-import { getPassportStatus, passportStatusLabel } from "../../lib/passport";
 import { getMissingAthleteFields } from "../../lib/profile";
 import type { Athlete } from "../../types/database";
 import {
@@ -69,7 +68,7 @@ export function AdminPlayersPage() {
     <>
       <PageHead
         title="Players"
-        subtitle="Athlete database with readiness signals."
+        subtitle="Roster database — assign players to campaigns from each campaign page."
         eyebrow="Admin"
       />
       <section className="card stack">
@@ -155,16 +154,13 @@ export function AdminPlayersPage() {
               <th>Login</th>
               <th>Positions</th>
               <th>Profile</th>
-              <th>Missing</th>
-              <th>Passport</th>
-              <th>Consent</th>
+              <th>Missing fields</th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
             {athletes.map((athlete) => {
               const missing = getMissingAthleteFields(athlete);
-              const passport = getPassportStatus(athlete.passport_expiry);
               return (
                 <tr key={athlete.id}>
                   <td>{athlete.preferred_name || athlete.legal_name || "Unknown athlete"}</td>
@@ -176,9 +172,7 @@ export function AdminPlayersPage() {
                   </td>
                   <td>{athlete.positions.length > 0 ? athlete.positions.join(", ") : "-"}</td>
                   <td>{athlete.profile_status}</td>
-                  <td>{missing.length}</td>
-                  <td>{passportStatusLabel(passport)}</td>
-                  <td>{athlete.data_sharing_consent ? "Yes" : "No"}</td>
+                  <td>{missing.length === 0 ? "—" : missing.length}</td>
                   <td>
                     <button
                       type="button"

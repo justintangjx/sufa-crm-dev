@@ -44,6 +44,7 @@ import type {
   AthletePatch,
   CampaignCoachAssignment,
   CampaignCoachView,
+  CampaignMemberUnassignment,
   CampaignMatrixStatusRow,
   CampaignOperatingSummary,
   CampaignReadinessEntry,
@@ -69,6 +70,11 @@ import type {
   TryoutBriefingInput,
 } from "./types";
 import { planRosterImport } from "../lib/rosterImport";
+import {
+  isCoachOnCampaign,
+  isPlayerOnCampaign,
+  shouldDropPendingNpsAssignment,
+} from "../lib/campaignMembership";
 import { athleteFieldsFromCreateInput, normalizeEmail } from "./payloads/athlete";
 import { briefingFieldsFromInput } from "./payloads/briefing";
 import { displayName } from "./payloads/display";
@@ -336,6 +342,14 @@ function buildNpsTasks(
       ) {
         return null;
       }
+      if (
+        raterKind === "player"
+          ? !raterAthleteId ||
+            !isPlayerOnCampaign(data.campaignMembers, survey.campaign_id, raterAthleteId)
+          : !isCoachOnCampaign(data.campaignCoaches, survey.campaign_id, raterProfileId)
+      ) {
+        return null;
+      }
       const targets: NpsTaskTarget[] =
         raterKind === "player"
           ? data.campaignCoaches
@@ -375,6 +389,37 @@ function buildNpsTasks(
       };
     })
     .filter((task): task is NpsTask => task !== null);
+}
+
+function cleanupPendingNpsAssignmentsInMock(params: {
+  campaignId: string;
+  athleteId?: string;
+  coachProfileId?: string;
+}) {
+  const data = getData();
+  const openSurveyIds = new Set(
+    data.npsSurveys
+      .filter((survey) => survey.campaign_id === params.campaignId && survey.status === "open")
+      .map((survey) => survey.id),
+  );
+  data.npsAssignments = data.npsAssignments.filter((assignment) => {
+    if (!openSurveyIds.has(assignment.survey_id)) {
+      return true;
+    }
+    if (params.athleteId) {
+      if (assignment.athlete_id !== params.athleteId) {
+        return true;
+      }
+    } else if (params.coachProfileId) {
+      if (assignment.coach_profile_id !== params.coachProfileId) {
+        return true;
+      }
+    } else {
+      return true;
+    }
+    const survey = data.npsSurveys.find((row) => row.id === assignment.survey_id);
+    return !shouldDropPendingNpsAssignment(assignment, survey, data.npsResponses);
+  });
 }
 
 export const mockApi: Api = {
@@ -664,6 +709,22 @@ export const mockApi: Api = {
     saveData(data);
   },
 
+  async unassignCampaignMember(input: CampaignMemberUnassignment) {
+    const data = getData();
+    const index = data.campaignMembers.findIndex(
+      (member) => member.campaign_id === input.campaignId && member.athlete_id === input.athleteId,
+    );
+    if (index === -1) {
+      throw new Error("Player is not on this campaign roster");
+    }
+    data.campaignMembers.splice(index, 1);
+    cleanupPendingNpsAssignmentsInMock({
+      campaignId: input.campaignId,
+      athleteId: input.athleteId,
+    });
+    saveData(data);
+  },
+
   async listCoachProfiles() {
     return getData().profiles.filter((profile) => profile.role === "coach");
   },
@@ -706,6 +767,23 @@ export const mockApi: Api = {
       coach_profile_id: input.coachProfileId,
       coach_role: "coach",
       created_at: now(),
+    });
+    saveData(data);
+  },
+
+  async unassignCampaignCoach(input: CampaignCoachAssignment) {
+    const data = getData();
+    const index = data.campaignCoaches.findIndex(
+      (row) =>
+        row.campaign_id === input.campaignId && row.coach_profile_id === input.coachProfileId,
+    );
+    if (index === -1) {
+      throw new Error("Coach is not assigned to this campaign");
+    }
+    data.campaignCoaches.splice(index, 1);
+    cleanupPendingNpsAssignmentsInMock({
+      campaignId: input.campaignId,
+      coachProfileId: input.coachProfileId,
     });
     saveData(data);
   },
@@ -979,6 +1057,14 @@ export const mockApi: Api = {
     const survey = data.npsSurveys.find((row) => row.id === input.surveyId);
     if (!assignment || !survey || survey.status !== "open") {
       throw new Error("NPS survey is not open for this rater");
+    }
+    if (assignment.rater_kind === "player") {
+      const athlete = data.athletes.find((row) => row.profile_id === input.raterProfileId);
+      if (!athlete || !isPlayerOnCampaign(data.campaignMembers, survey.campaign_id, athlete.id)) {
+        throw new Error("You are not on this campaign roster");
+      }
+    } else if (!isCoachOnCampaign(data.campaignCoaches, survey.campaign_id, input.raterProfileId)) {
+      throw new Error("You are not assigned to this campaign");
     }
     const existing = data.npsResponses.find(
       (response) =>

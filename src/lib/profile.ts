@@ -1,4 +1,5 @@
 import type { Athlete } from "../types/database";
+import { enableTravelReadiness } from "./env";
 
 // A required profile field and where it lives in the profile form.
 export interface RequiredField {
@@ -36,6 +37,16 @@ export const REQUIRED_FIELDS: readonly RequiredField[] = [
   },
 ];
 
+const TRAVEL_FIELDS = new Set<keyof Athlete>(["passport_expiry"]);
+
+/** Active required fields for the current deployment (pilot omits travel). */
+export function getRequiredFields(): readonly RequiredField[] {
+  if (enableTravelReadiness) {
+    return REQUIRED_FIELDS;
+  }
+  return REQUIRED_FIELDS.filter((field) => !TRAVEL_FIELDS.has(field.field));
+}
+
 // A field counts as present when it holds a non-empty value. Consent booleans must be true.
 export function isFieldComplete(athlete: Athlete, field: keyof Athlete): boolean {
   const value = athlete[field];
@@ -47,17 +58,20 @@ export function isFieldComplete(athlete: Athlete, field: keyof Athlete): boolean
 
 // Required fields the athlete is still missing.
 export function getMissingAthleteFields(athlete: Athlete): MissingField[] {
-  return REQUIRED_FIELDS.filter((f) => !isFieldComplete(athlete, f.field)).map((f) => ({
-    field: f.field as string,
-    label: f.label,
-    section: f.section,
-  }));
+  return getRequiredFields()
+    .filter((f) => !isFieldComplete(athlete, f.field))
+    .map((f) => ({
+      field: f.field as string,
+      label: f.label,
+      section: f.section,
+    }));
 }
 
 // Completion as a 0-100 integer percentage over the required fields.
 export function getProfileCompletion(athlete: Athlete): number {
-  const total = REQUIRED_FIELDS.length;
-  const complete = REQUIRED_FIELDS.filter((f) => isFieldComplete(athlete, f.field)).length;
+  const fields = getRequiredFields();
+  const total = fields.length;
+  const complete = fields.filter((f) => isFieldComplete(athlete, f.field)).length;
   return Math.round((complete / total) * 100);
 }
 

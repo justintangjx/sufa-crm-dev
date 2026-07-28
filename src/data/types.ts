@@ -94,6 +94,11 @@ export interface CampaignMemberAssignment {
   status: CampaignMemberStatus;
 }
 
+export interface CampaignMemberUnassignment {
+  campaignId: string;
+  athleteId: string;
+}
+
 export interface CampaignCoachAssignment {
   campaignId: string;
   coachProfileId: string;
@@ -356,9 +361,11 @@ export interface Api {
   getCampaign(id: string): Promise<Campaign | null>;
   createCampaign(input: NewCampaign, createdBy: string): Promise<Campaign>;
   assignCampaignMember(input: CampaignMemberAssignment): Promise<void>;
+  unassignCampaignMember(input: CampaignMemberUnassignment): Promise<void>;
   listCoachProfiles(): Promise<Profile[]>;
   listCampaignCoaches(campaignId: string): Promise<CampaignCoachView[]>;
   assignCampaignCoach(input: CampaignCoachAssignment): Promise<void>;
+  unassignCampaignCoach(input: CampaignCoachAssignment): Promise<void>;
   createCoachProfile(input: CreateCoachProfileInput): Promise<Profile>;
   getCampaignReadiness(campaignId: string): Promise<CampaignReadinessEntry[]>;
   getCampaignOperatingSummary(campaignId: string): Promise<CampaignOperatingSummary>;

@@ -58,6 +58,7 @@ export function AdminCampaignDetailPage() {
   const [npsSurveys, setNpsSurveys] = useState<CampaignNpsSurvey[]>([]);
   const [newPlayer, setNewPlayer] = useState({ name: "", email: "" });
   const [message, setMessage] = useState<string | null>(null);
+  const [manualPlayerOpen, setManualPlayerOpen] = useState(false);
   const coachMode = coachProvisioningMode(useMockBackend);
   const rosterRows = buildCampaignRosterRows(rows, athletes);
 
@@ -219,6 +220,46 @@ export function AdminCampaignDetailPage() {
     }
   }
 
+  async function handleUnassignPlayer(athleteId: string, name: string) {
+    if (
+      !window.confirm(
+        `Remove ${name} from ${campaign?.name ?? "this campaign"}? They can be reassigned later.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.unassignCampaignMember({
+        campaignId,
+        athleteId,
+      });
+      setMessage(`${name} removed from ${campaign?.name ?? "campaign"}.`);
+      await loadCampaignDetail();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not remove the player.");
+    }
+  }
+
+  async function handleUnassignCoach(coach: CampaignCoachView) {
+    if (
+      !window.confirm(
+        `Remove ${coach.name} from ${campaign?.name ?? "this campaign"}? They can be reassigned later.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.unassignCampaignCoach({
+        campaignId,
+        coachProfileId: coach.coachProfileId,
+      });
+      setMessage(`${coach.name} removed from ${campaign?.name ?? "campaign"}.`);
+      await loadCampaignDetail();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not remove the coach.");
+    }
+  }
+
   async function handleCreateAndAssignCoach(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!newCoach.name.trim() || !newCoach.email.trim()) {
@@ -300,6 +341,7 @@ export function AdminCampaignDetailPage() {
               <tr>
                 <th>Name</th>
                 <th>Login email</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -307,103 +349,128 @@ export function AdminCampaignDetailPage() {
                 <tr key={row.athleteId}>
                   <td>{row.name}</td>
                   <td>{row.email}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => void handleUnassignPlayer(row.athleteId, row.name)}
+                    >
+                      Remove
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </section>
       ) : null}
-      <details className="card stack optional-panel">
-        <summary>Add individual player (optional)</summary>
-        <p className="muted">
-          For one-offs only. Bulk load uses CSV import above — one file per team.
-        </p>
-        {unassignedAthletes.length > 0 ? (
-          <form
-            className="grid cols-3 assignment-form"
-            onSubmit={(event) => void handleAssignPlayer(event)}
-          >
-            <div className="field">
-              <label htmlFor="assign-player">Existing player</label>
-              <select
-                id="assign-player"
-                value={assignment.athleteId}
-                onChange={(event) =>
-                  setAssignment((current) => ({ ...current, athleteId: event.target.value }))
-                }
-              >
-                {unassignedAthletes.map((athlete) => (
-                  <option key={athlete.id} value={athlete.id}>
-                    {athlete.preferred_name || athlete.legal_name || "Unnamed player"}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="assign-status">Assignment status</label>
-              <select
-                id="assign-status"
-                value={assignment.status}
-                onChange={(event) =>
-                  setAssignment((current) => ({
-                    ...current,
-                    status: event.target.value as CampaignAssignmentFormState["status"],
-                  }))
-                }
-              >
-                <option value="invited">Invited</option>
-                <option value="registered">Registered</option>
-                <option value="selected">Selected</option>
-                <option value="reserve">Reserve</option>
-                <option value="withdrawn">Withdrawn</option>
-              </select>
-            </div>
-            <div className="field field-action">
-              <label aria-hidden="true">&nbsp;</label>
-              <button type="submit" className="btn primary">
-                Assign player
-              </button>
-            </div>
-          </form>
-        ) : (
-          <p className="muted">All athletes in the CRM are already assigned to this campaign.</p>
-        )}
-        <form
-          className="grid cols-3 assignment-form"
-          onSubmit={(event) => void handleCreateAndAssignPlayer(event)}
+      <section className="card stack optional-panel">
+        <button
+          type="button"
+          className="optional-panel-trigger"
+          aria-expanded={manualPlayerOpen}
+          onClick={() => setManualPlayerOpen((open) => !open)}
         >
-          <div className="field">
-            <label htmlFor="new-player-name">New player name</label>
-            <input
-              id="new-player-name"
-              type="text"
-              value={newPlayer.name}
-              onChange={(event) =>
-                setNewPlayer((current) => ({ ...current, name: event.target.value }))
-              }
-              placeholder="Full name"
-            />
+          <span className="optional-panel-chevron" aria-hidden="true">
+            {manualPlayerOpen ? "−" : "+"}
+          </span>
+          <span className="optional-panel-label">
+            <strong>Add one player manually</strong>
+            <span className="muted">Optional — use CSV import above for full rosters</span>
+          </span>
+        </button>
+        {manualPlayerOpen ? (
+          <div className="optional-panel-body stack">
+            {unassignedAthletes.length > 0 ? (
+              <form
+                className="grid cols-3 assignment-form"
+                onSubmit={(event) => void handleAssignPlayer(event)}
+              >
+                <div className="field">
+                  <label htmlFor="assign-player">Existing player</label>
+                  <select
+                    id="assign-player"
+                    value={assignment.athleteId}
+                    onChange={(event) =>
+                      setAssignment((current) => ({ ...current, athleteId: event.target.value }))
+                    }
+                  >
+                    {unassignedAthletes.map((athlete) => (
+                      <option key={athlete.id} value={athlete.id}>
+                        {athlete.preferred_name || athlete.legal_name || "Unnamed player"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="assign-status">Assignment status</label>
+                  <select
+                    id="assign-status"
+                    value={assignment.status}
+                    onChange={(event) =>
+                      setAssignment((current) => ({
+                        ...current,
+                        status: event.target.value as CampaignAssignmentFormState["status"],
+                      }))
+                    }
+                  >
+                    <option value="invited">Invited</option>
+                    <option value="registered">Registered</option>
+                    <option value="selected">Selected</option>
+                    <option value="reserve">Reserve</option>
+                    <option value="withdrawn">Withdrawn</option>
+                  </select>
+                </div>
+                <div className="field field-action">
+                  <label aria-hidden="true">&nbsp;</label>
+                  <button type="submit" className="btn primary">
+                    Assign player
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <p className="muted">
+                All athletes in the CRM are already assigned to this campaign.
+              </p>
+            )}
+            <form
+              className="grid cols-3 assignment-form"
+              onSubmit={(event) => void handleCreateAndAssignPlayer(event)}
+            >
+              <div className="field">
+                <label htmlFor="new-player-name">New player name</label>
+                <input
+                  id="new-player-name"
+                  type="text"
+                  value={newPlayer.name}
+                  onChange={(event) =>
+                    setNewPlayer((current) => ({ ...current, name: event.target.value }))
+                  }
+                  placeholder="Full name"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="new-player-email">Login email</label>
+                <input
+                  id="new-player-email"
+                  type="email"
+                  value={newPlayer.email}
+                  onChange={(event) =>
+                    setNewPlayer((current) => ({ ...current, email: event.target.value }))
+                  }
+                  placeholder="player@example.com"
+                />
+              </div>
+              <div className="field field-action">
+                <label aria-hidden="true">&nbsp;</label>
+                <button type="submit" className="btn">
+                  Add and invite player
+                </button>
+              </div>
+            </form>
           </div>
-          <div className="field">
-            <label htmlFor="new-player-email">Login email</label>
-            <input
-              id="new-player-email"
-              type="email"
-              value={newPlayer.email}
-              onChange={(event) =>
-                setNewPlayer((current) => ({ ...current, email: event.target.value }))
-              }
-              placeholder="player@example.com"
-            />
-          </div>
-          <div className="field field-action">
-            <label aria-hidden="true">&nbsp;</label>
-            <button type="submit" className="btn">
-              Add and invite player
-            </button>
-          </div>
-        </form>
-      </details>
+        ) : null}
+      </section>
       <section className="card stack">
         <div className="section-title">
           <h2>Assign coaches</h2>
@@ -413,13 +480,22 @@ export function AdminCampaignDetailPage() {
           <p className={`alert ${alertTone(message)}`}>{message}</p>
         ) : null}
         {campaignCoaches.length > 0 ? (
-          <ul className="compact-list">
+          <ul className="compact-list coach-assignment-list">
             {campaignCoaches.map((coach) => (
               <li key={coach.id}>
-                <strong>{coach.name}</strong>
-                <span>
-                  {coach.email} · {coach.coachRole.replaceAll("_", " ")}
-                </span>
+                <div>
+                  <strong>{coach.name}</strong>
+                  <span>
+                    {coach.email} · {coach.coachRole.replaceAll("_", " ")}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => void handleUnassignCoach(coach)}
+                >
+                  Remove
+                </button>
               </li>
             ))}
           </ul>
