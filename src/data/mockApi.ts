@@ -50,6 +50,7 @@ import type {
   CampaignReadinessEntry,
   CampaignRosterImportInput,
   CampaignWithMembership,
+  CampaignQuestionnaireImportInput,
   ChangeRequestView,
   CoachMatrixInput,
   CreateAthleteInput,
@@ -84,6 +85,16 @@ import {
   playerMatrixFieldsFromInput,
 } from "./payloads/matrix";
 import { generateId, getCurrentUserId, getData, saveData, setCurrentUserId } from "./store";
+import {
+  mockCloseSurveyInstance,
+  mockCommitQuestionnaireImport,
+  mockGetMySurveyAssignment,
+  mockGetSurveySectionAggregates,
+  mockListSurveyCompletion,
+  mockOpenSurveyInstance,
+  mockPublishSurveyTemplate,
+  mockSaveSurveyAnswers,
+} from "./surveyMockOps";
 
 function now(): string {
   return new Date().toISOString();
@@ -1560,5 +1571,80 @@ export const mockApi: Api = {
     run.field_edit_count = input.fieldEditCount;
     run.normalized_edit_distance = input.normalizedEditDistance;
     saveData(data);
+  },
+
+  async commitQuestionnaireImport(input: CampaignQuestionnaireImportInput) {
+    const data = getData();
+    const result = mockCommitQuestionnaireImport(data, input, () => generateId("survey"));
+    saveData(data);
+    return result;
+  },
+
+  async listSurveyTemplates(campaignId: string) {
+    return getData()
+      .surveyTemplates.filter((template) => template.campaign_id === campaignId)
+      .toSorted((a, b) => a.audience.localeCompare(b.audience) || b.version - a.version);
+  },
+
+  async getSurveyTemplateBundle(templateId: string) {
+    const data = getData();
+    const template = data.surveyTemplates.find((row) => row.id === templateId);
+    if (!template) {
+      return null;
+    }
+    const sections = data.surveySections
+      .filter((section) => section.template_id === templateId)
+      .toSorted((a, b) => a.sort_order - b.sort_order);
+    const sectionIds = new Set(sections.map((section) => section.id));
+    const questions = data.surveyQuestions
+      .filter((question) => sectionIds.has(question.section_id))
+      .toSorted((a, b) => a.sort_order - b.sort_order);
+    return { template, sections, questions };
+  },
+
+  async publishSurveyTemplate(templateId: string, publishedBy: string) {
+    const data = getData();
+    const bundle = mockPublishSurveyTemplate(data, templateId, publishedBy);
+    saveData(data);
+    return bundle;
+  },
+
+  async listSurveyInstances(campaignId: string) {
+    return getData()
+      .surveyInstances.filter((instance) => instance.campaign_id === campaignId)
+      .toSorted((a, b) => a.audience.localeCompare(b.audience));
+  },
+
+  async openSurveyInstance(input) {
+    const data = getData();
+    const instance = mockOpenSurveyInstance(data, input, () => generateId("survey"));
+    saveData(data);
+    return instance;
+  },
+
+  async closeSurveyInstance(instanceId: string) {
+    const data = getData();
+    const instance = mockCloseSurveyInstance(data, instanceId);
+    saveData(data);
+    return instance;
+  },
+
+  async listSurveyCompletion(campaignId: string) {
+    return mockListSurveyCompletion(getData(), campaignId);
+  },
+
+  async getSurveySectionAggregates(campaignId, audience) {
+    return mockGetSurveySectionAggregates(getData(), campaignId, audience);
+  },
+
+  async getMySurveyAssignment(profileId: string, campaignId: string) {
+    return mockGetMySurveyAssignment(getData(), profileId, campaignId);
+  },
+
+  async saveSurveyAnswers(input) {
+    const data = getData();
+    const bundle = mockSaveSurveyAnswers(data, input, () => generateId("survey"));
+    saveData(data);
+    return bundle;
   },
 };

@@ -9,6 +9,7 @@ const forcePlayerGrowthMatrix = import.meta.env.VITE_ENABLE_PLAYER_GROWTH_MATRIX
 const forceCampaignEvaluationMatrix =
   import.meta.env.VITE_ENABLE_CAMPAIGN_EVALUATION_MATRIX === "true";
 const forceCampaignNps = import.meta.env.VITE_ENABLE_CAMPAIGN_NPS === "true";
+const forceCampaignQuestionnaire = import.meta.env.VITE_ENABLE_CAMPAIGN_QUESTIONNAIRE === "true";
 
 export const supabaseUrl = url ?? "";
 export const supabaseAnonKey = anonKey ?? "";
@@ -54,6 +55,8 @@ export const enablePlayerGrowthMatrix = useMockBackend || forcePlayerGrowthMatri
 export const enableCampaignEvaluationMatrix = useMockBackend || forceCampaignEvaluationMatrix;
 
 export const enableCampaignNps = useMockBackend || forceCampaignNps;
+
+export const enableCampaignQuestionnaire = useMockBackend || forceCampaignQuestionnaire;
 
 // Travel/passport readiness is post-pilot; off by default on Supabase and in tests.
 export const enableTravelReadiness = import.meta.env.VITE_ENABLE_TRAVEL_READINESS === "true";

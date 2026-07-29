@@ -9,6 +9,7 @@ import type {
   CampaignReadinessEntry,
   GrowthReviewWithDetails,
   NpsReport,
+  SurveyCompletionRow,
 } from "../../data/types";
 import { buildCampaignRosterRows, coachProvisioningMode } from "../../lib/adminCampaignOps";
 import { campaignCapabilities } from "../../lib/campaignCapabilities";
@@ -17,12 +18,16 @@ import type {
   Athlete,
   Campaign,
   CampaignNpsSurvey,
+  CampaignSurveyInstance,
+  CampaignSurveyTemplate,
   CampaignTryoutBriefing,
   EvaluationAuditEvent,
   Profile,
 } from "../../types/database";
 import { AdminGrowthMatrixPanel, AdminLiveMatrixPanel, AdminNpsPanel } from "./AdminCampaignPanels";
+import { AdminQuestionnaireImportPanel } from "./AdminQuestionnaireImportPanel";
 import { AdminRosterImportPanel } from "./AdminRosterImportPanel";
+import { AdminSurveyPanel } from "./AdminSurveyPanel";
 import { emptyCampaignAssignmentForm, type CampaignAssignmentFormState } from "./adminCampaignForm";
 
 function alertTone(message: string): "ok" | "warn" {
@@ -56,6 +61,9 @@ export function AdminCampaignDetailPage() {
   const [auditEvents, setAuditEvents] = useState<EvaluationAuditEvent[]>([]);
   const [npsReport, setNpsReport] = useState<NpsReport>({ coachRows: [], playerRows: [] });
   const [npsSurveys, setNpsSurveys] = useState<CampaignNpsSurvey[]>([]);
+  const [surveyTemplates, setSurveyTemplates] = useState<CampaignSurveyTemplate[]>([]);
+  const [surveyInstances, setSurveyInstances] = useState<CampaignSurveyInstance[]>([]);
+  const [surveyCompletion, setSurveyCompletion] = useState<SurveyCompletionRow[]>([]);
   const [newPlayer, setNewPlayer] = useState({ name: "", email: "" });
   const [message, setMessage] = useState<string | null>(null);
   const [manualPlayerOpen, setManualPlayerOpen] = useState(false);
@@ -110,6 +118,20 @@ export function AdminCampaignDetailPage() {
       setNpsReport({ coachRows: [], playerRows: [] });
       setNpsSurveys([]);
     }
+    if (campaignCapabilities(nextCampaign).endOfCampaignSurvey) {
+      const [nextTemplates, nextInstances, nextCompletion] = await Promise.all([
+        api.listSurveyTemplates(campaignId),
+        api.listSurveyInstances(campaignId),
+        api.listSurveyCompletion(campaignId),
+      ]);
+      setSurveyTemplates(nextTemplates);
+      setSurveyInstances(nextInstances);
+      setSurveyCompletion(nextCompletion);
+    } else {
+      setSurveyTemplates([]);
+      setSurveyInstances([]);
+      setSurveyCompletion([]);
+    }
     void loadGrowthMatrixAdmin();
   }, [campaignId, loadGrowthMatrixAdmin]);
 
@@ -118,10 +140,11 @@ export function AdminCampaignDetailPage() {
   }, [loadCampaignDetail]);
 
   useEffect(() => {
-    if (location.hash !== "#nps") {
+    if (location.hash !== "#nps" && location.hash !== "#survey") {
       return;
     }
-    document.getElementById("nps")?.scrollIntoView({ behavior: "smooth" });
+    const id = location.hash.replace("#", "");
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
   }, [location.hash, campaign]);
 
   const assignedAthleteIds = new Set(rows.map((row) => row.athleteId));
@@ -591,6 +614,28 @@ export function AdminCampaignDetailPage() {
           </form>
         ) : null}
       </section>
+      {detailCaps.endOfCampaignSurvey && profile ? (
+        <>
+          <AdminQuestionnaireImportPanel
+            campaignId={campaignId}
+            campaignName={campaign?.name ?? "Campaign"}
+            createdBy={profile.id}
+            hasOpenInstance={surveyInstances.some((row) => row.status === "open")}
+            onImported={loadCampaignDetail}
+          />
+          <AdminSurveyPanel
+            campaignId={campaignId}
+            campaignName={campaign?.name ?? "Campaign"}
+            rosterCount={rows.length}
+            coachCount={campaignCoaches.length}
+            templates={surveyTemplates}
+            instances={surveyInstances}
+            completion={surveyCompletion}
+            profileId={profile.id}
+            onChanged={loadCampaignDetail}
+          />
+        </>
+      ) : null}
       {detailCaps.coachNps ? (
         <AdminNpsPanel
           campaignId={campaignId}

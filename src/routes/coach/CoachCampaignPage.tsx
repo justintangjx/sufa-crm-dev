@@ -3,8 +3,14 @@ import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { RatingField, TextAreaField, TextField } from "../../components/shell/FormFields";
 import { Badge, PageHead } from "../../components/shell/PagePrimitives";
+import { CampaignSurveyForm } from "../../components/shell/CampaignSurveyForm";
 import { api } from "../../data";
-import type { CampaignMatrixStatusRow, GrowthReviewWithDetails, NpsTask } from "../../data/types";
+import type {
+  CampaignMatrixStatusRow,
+  GrowthReviewWithDetails,
+  NpsTask,
+  SurveyAssignmentBundle,
+} from "../../data/types";
 import { campaignCapabilities } from "../../lib/campaignCapabilities";
 import { optionalText } from "../../lib/form";
 import {
@@ -53,6 +59,7 @@ export function CoachCampaignPage() {
   const [npsTasks, setNpsTasks] = useState<NpsTask[]>([]);
   const [npsScores, setNpsScores] = useState<Record<string, string>>({});
   const [npsComments, setNpsComments] = useState<Record<string, string>>({});
+  const [surveyBundle, setSurveyBundle] = useState<SurveyAssignmentBundle | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const loadAthleteAssessmentContext = useCallback(
@@ -79,19 +86,24 @@ export function CoachCampaignPage() {
     }
     const nextCampaign = await api.getCampaign(campaignId);
     const nextCaps = campaignCapabilities(nextCampaign);
-    const [nextAthletes, nextGrowthReviews, nextMatrixRows, nextNpsTasks] = await Promise.all([
-      api.getCoachAthletes(campaignId),
-      nextCaps.growthMatrix
-        ? api.getCoachGrowthReviews(campaignId, profile.id)
-        : Promise.resolve([]),
-      nextCaps.liveMatrix ? api.getCampaignMatrixStatus(campaignId) : Promise.resolve([]),
-      nextCaps.coachNps ? api.listCoachNpsTasks(profile.id, campaignId) : Promise.resolve([]),
-    ]);
+    const [nextAthletes, nextGrowthReviews, nextMatrixRows, nextNpsTasks, nextSurvey] =
+      await Promise.all([
+        api.getCoachAthletes(campaignId),
+        nextCaps.growthMatrix
+          ? api.getCoachGrowthReviews(campaignId, profile.id)
+          : Promise.resolve([]),
+        nextCaps.liveMatrix ? api.getCampaignMatrixStatus(campaignId) : Promise.resolve([]),
+        nextCaps.coachNps ? api.listCoachNpsTasks(profile.id, campaignId) : Promise.resolve([]),
+        nextCaps.endOfCampaignSurvey
+          ? api.getMySurveyAssignment(profile.id, campaignId)
+          : Promise.resolve(null),
+      ]);
     setCampaign(nextCampaign);
     setAthletes(nextAthletes);
     setGrowthReviews(nextGrowthReviews);
     setMatrixRows(nextMatrixRows);
     setNpsTasks(nextNpsTasks);
+    setSurveyBundle(nextSurvey);
     setGrowthForm((current) => ({
       ...current,
       athleteId: current.athleteId || nextAthletes[0]?.id || "",
@@ -536,6 +548,24 @@ export function CoachCampaignPage() {
             rows are immutable and visible to the player and admin. Each save is recorded in the
             evaluation audit trail.
           </p>
+        </section>
+      ) : null}
+      {coachCaps.endOfCampaignSurvey && surveyBundle ? (
+        <section className="card stack">
+          <CampaignSurveyForm
+            bundle={surveyBundle}
+            onSave={async (answers, submit) => {
+              if (!profile) {
+                return;
+              }
+              const next = await api.saveSurveyAnswers({
+                assignmentId: surveyBundle.assignment.id,
+                answers,
+                submit,
+              });
+              setSurveyBundle(next);
+            }}
+          />
         </section>
       ) : null}
       {coachCaps.coachNps && npsTasks.length > 0 ? (

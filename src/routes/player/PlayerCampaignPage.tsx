@@ -3,8 +3,9 @@ import { useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { RatingField, TextAreaField, TextField } from "../../components/shell/FormFields";
 import { Badge, PageHead } from "../../components/shell/PagePrimitives";
+import { CampaignSurveyForm } from "../../components/shell/CampaignSurveyForm";
 import { api } from "../../data";
-import type { NpsTask, PlayerCampaignFlow } from "../../data/types";
+import type { NpsTask, PlayerCampaignFlow, SurveyAssignmentBundle } from "../../data/types";
 import { campaignCapabilities, hasAnyCampaignFeature } from "../../lib/campaignCapabilities";
 import { optionalText } from "../../lib/form";
 import type {
@@ -47,6 +48,7 @@ export function PlayerCampaignPage() {
   const [npsTasks, setNpsTasks] = useState<NpsTask[]>([]);
   const [npsScores, setNpsScores] = useState<Record<string, string>>({});
   const [npsComments, setNpsComments] = useState<Record<string, string>>({});
+  const [surveyBundle, setSurveyBundle] = useState<SurveyAssignmentBundle | null>(null);
   const [reply, setReply] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,9 +66,13 @@ export function PlayerCampaignPage() {
     const nextNpsTasks = nextCaps.coachNps
       ? await api.listPlayerNpsTasks(profile.id, campaignId)
       : [];
+    const nextSurvey = nextCaps.endOfCampaignSurvey
+      ? await api.getMySurveyAssignment(profile.id, campaignId)
+      : null;
     setFlow(nextFlow);
     setAthlete(nextAthlete);
     setNpsTasks(nextNpsTasks);
+    setSurveyBundle(nextSurvey);
     if (nextAthlete && nextCaps.liveMatrix) {
       const [nextDraft, nextHistory, nextCoachEvaluations] = await Promise.all([
         api.getPlayerMatrixDraft(campaignId, nextAthlete.id),
@@ -196,13 +202,14 @@ export function PlayerCampaignPage() {
   const caps = campaignCapabilities(flow.campaign);
   const showCampaignMatrix = caps.liveMatrix;
   const showCampaignNps = caps.coachNps;
+  const showCampaignSurvey = caps.endOfCampaignSurvey && surveyBundle !== null;
 
   return (
     <>
       <PageHead
         title={flow.campaign.name}
         subtitle={
-          caps.liveMatrix || caps.coachNps
+          caps.liveMatrix || caps.coachNps || caps.endOfCampaignSurvey
             ? "U24 campaign tasks from training start through competition closeout."
             : "Campaign readiness tasks from training start through competition closeout."
         }
@@ -365,6 +372,24 @@ export function PlayerCampaignPage() {
               </tbody>
             </table>
           </div>
+        </section>
+      ) : null}
+      {showCampaignSurvey && surveyBundle ? (
+        <section className="card stack">
+          <CampaignSurveyForm
+            bundle={surveyBundle}
+            onSave={async (answers, submit) => {
+              if (!profile) {
+                return;
+              }
+              const next = await api.saveSurveyAnswers({
+                assignmentId: surveyBundle.assignment.id,
+                answers,
+                submit,
+              });
+              setSurveyBundle(next);
+            }}
+          />
         </section>
       ) : null}
       {showCampaignNps && npsTasks.length > 0 ? (

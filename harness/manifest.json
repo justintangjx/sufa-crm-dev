@@ -25,9 +25,13 @@
     "campaignUnit": {
       "id": "campaignUnit",
       "kind": "suite",
-      "command": "pnpm exec vitest run src/lib/campaignManagement.test.ts src/lib/campaignCapabilities.test.ts",
-      "description": "Matrix completeness, NPS thresholds, U24 capability gating",
-      "paths": ["src/lib/campaignManagement.test.ts", "src/lib/campaignCapabilities.test.ts"]
+      "command": "pnpm exec vitest run src/lib/campaignManagement.test.ts src/lib/campaignCapabilities.test.ts src/lib/questionnaireImport.test.ts",
+      "description": "Matrix completeness, NPS thresholds, U24 capability gating, questionnaire CSV import",
+      "paths": [
+        "src/lib/campaignManagement.test.ts",
+        "src/lib/campaignCapabilities.test.ts",
+        "src/lib/questionnaireImport.test.ts"
+      ]
     },
     "coachNotesDeterministic": {
       "id": "coachNotesDeterministic",
@@ -84,6 +88,35 @@
         "Player can see submitted coach assessments about themselves only"
       ],
       "goNoGo": "NO-GO if migrations missing, flag on without history indexes, or coaches can edit submitted rows."
+    },
+    "VITE_ENABLE_CAMPAIGN_QUESTIONNAIRE": {
+      "default": false,
+      "mockAutoOn": true,
+      "gates": ["endOfCampaignSurvey"],
+      "docs": ["docs/domains/campaign-survey-admin.md", "docs/domains/campaign.md"],
+      "supabase": {
+        "migrationsInOrder": [
+          "20260704000000_campaign_management_pivot.sql",
+          "20260713000000_closed_roster.sql",
+          "20260729100000_campaign_questionnaires.sql"
+        ],
+        "notes": "End-of-campaign retrospective questionnaire (U20-style Likert/NPS). Mutually exclusive with peer NPS on U24 when enabled via campaignCapabilities."
+      },
+      "cloudflare": {
+        "pagesEnv": {
+          "VITE_ENABLE_CAMPAIGN_QUESTIONNAIRE": "true"
+        },
+        "notes": "Set VITE_ENABLE_CAMPAIGN_NPS=false for U24 pilot. Rebuild/redeploy Pages after env change."
+      },
+      "manualChecks": [
+        "Pilot campaigns exist: U24 Mixed (c-u24), Opens (c-u24-opens), Womens (c-u24-womens), plus c-survey-test for prod smoke without matrix",
+        "Admin uploads one questionnaire CSV (audience column) and commits player + coach templates on #survey",
+        "Admin publishes questionnaire, opens window, sees completion roster and aggregate preview",
+        "Assigned players and coaches see sectioned Likert form; coaches skip player_only items",
+        "Admin exports responses CSV; chase-message copy available on #survey",
+        "Google Forms is not required for pilot end-of-tournament survey"
+      ],
+      "goNoGo": "NO-GO if flag on without campaign_questionnaires migration, or peer NPS UI still shown on U24 pilot campaigns."
     },
     "VITE_ENABLE_CAMPAIGN_NPS": {
       "default": false,
@@ -187,28 +220,37 @@
     },
     "pilot-u24": {
       "id": "pilot-u24",
-      "description": "One campaign; open roster (~12-25 players, 1-3 coaches); soft coach 2/2; player journal; in-app end NPS (replaces Google Forms). Coach LLM and Growth Matrix stay off.",
-      "requiresFlagsOn": ["VITE_ENABLE_CAMPAIGN_EVALUATION_MATRIX", "VITE_ENABLE_CAMPAIGN_NPS"],
-      "requiresFlagsOff": ["VITE_ENABLE_PLAYER_GROWTH_MATRIX", "VITE_ENABLE_COACH_LLM"],
+      "description": "Three U24 team campaigns (Mixed, Opens, Womens); open roster (~12-25 players, 1-3 coaches); soft coach 2/2; player journal; in-app end-of-campaign questionnaire (replaces Google Forms). Peer NPS and Coach LLM stay off.",
+      "requiresFlagsOn": [
+        "VITE_ENABLE_CAMPAIGN_EVALUATION_MATRIX",
+        "VITE_ENABLE_CAMPAIGN_QUESTIONNAIRE"
+      ],
+      "requiresFlagsOff": [
+        "VITE_ENABLE_PLAYER_GROWTH_MATRIX",
+        "VITE_ENABLE_COACH_LLM",
+        "VITE_ENABLE_CAMPAIGN_NPS"
+      ],
       "automatedSuites": ["check", "campaignUnit", "e2e"],
       "liveSuites": [],
       "manualChecks": [
-        "Pilot campaigns exist; admin can import roster CSV (~22/team) and assign coaches (1-3) via UI",
+        "Pilot campaigns exist (Mixed, Opens, Womens); admin can import roster CSV (~22/team) and assign coaches (1-3) via UI",
+        "c-survey-test campaign exists for prod smoke with questionnaire only (no matrix)",
         "Magic-link emails for pilot players/coaches are deliverable (not .test) if using real Auth",
-        "Campaign migrations applied on the target Supabase project (matrix + closed roster + history + NPS)",
+        "Campaign migrations applied on the target Supabase project (matrix + closed roster + history + questionnaires)",
         "Cloudflare Pages env matches requiresFlagsOn/Off for this profile",
         "U24 UI does not push coaches onto legacy Growth Matrix or /coach/evaluations for the pilot path",
-        "Admin can open/close a single end-of-campaign NPS survey (POST; mid stays closed)",
+        "Admin can publish/open/close end-of-campaign questionnaire on #survey (peer NPS stays off)",
         "Soft UI shows coach assessment progress toward 2 submits per player (nudge at 0; confirm at/over 2; no hard DB cap)"
       ],
       "acceptance": [
         "Admin assigns coaches from campaign UI without SQL",
         "Admin can preview and commit a campaign roster CSV (create/assign by email; one campaign per file)",
+        "Admin can import questionnaire CSV and publish player + coach templates",
         "Coach can filter/select by player and load that player's records",
         "Coach can submit two matrix assessments per player within the campaign (soft limit)",
         "Player can view past self-evaluations and submit unlimited journal entries",
         "Player can view coaches' submitted assessments about them",
-        "Admin runs one in-app NPS at campaign end; aggregate dashboard readable; Forms not required"
+        "Admin runs in-app questionnaire at campaign end; completion roster + export; Forms not required"
       ],
       "verdictRule": "GO only if automatedSuites pass, every requiresFlagsOn dependency (migrations + Cloudflare env) is confirmed, requiresFlagsOff remain false, and all acceptance bullets are demonstrated on the pilot roster."
     },

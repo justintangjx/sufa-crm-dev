@@ -35,6 +35,12 @@ import type {
 } from "../lib/coachNotes";
 import type { PriorCoachEvaluation } from "../types/database";
 import type { RosterImportCommitResult, RosterImportSourceRow } from "../lib/rosterImport";
+import type {
+  QuestionnaireImportPlan,
+  QuestionnaireImportSourceRow,
+} from "../lib/questionnaireImport";
+import type { SurveyAnswerInput } from "../lib/campaignSurvey";
+import type { SurveySectionAggregate } from "../lib/campaignSurvey";
 
 export type {
   RosterImportCommitResult,
@@ -343,6 +349,42 @@ export interface NpsReport {
   playerRows: NpsPlayerReportRow[];
 }
 
+export interface CampaignQuestionnaireImportInput {
+  campaignId: string;
+  rows: QuestionnaireImportSourceRow[];
+  createdBy: string;
+}
+
+export interface QuestionnaireImportCommitResult {
+  plan: QuestionnaireImportPlan;
+  playerTemplateId: string;
+  coachTemplateId: string;
+}
+
+export interface SurveyTemplateBundle {
+  template: import("../types/database").CampaignSurveyTemplate;
+  sections: import("../types/database").CampaignSurveySection[];
+  questions: import("../types/database").CampaignSurveyQuestion[];
+}
+
+export interface SurveyCompletionRow {
+  profileId: string;
+  name: string;
+  email: string;
+  audience: import("../types/database").SurveyAudience;
+  status: import("../types/database").SurveyAssignmentStatus;
+  answeredCount: number;
+  questionCount: number;
+  submittedAt: string | null;
+}
+
+export interface SurveyAssignmentBundle {
+  assignment: import("../types/database").CampaignSurveyAssignment;
+  instance: import("../types/database").CampaignSurveyInstance;
+  template: SurveyTemplateBundle;
+  answers: import("../types/database").CampaignSurveyAnswer[];
+}
+
 export interface Api {
   getCurrentProfile(): Promise<Profile | null>;
   signIn(email: string): Promise<SignInResult>;
@@ -399,6 +441,39 @@ export interface Api {
   listCoachNpsTasks(coachProfileId: string, campaignId?: string): Promise<NpsTask[]>;
   submitNpsResponse(input: NpsResponseInput): Promise<void>;
   getNpsReport(campaignId: string): Promise<NpsReport>;
+  commitQuestionnaireImport(
+    input: CampaignQuestionnaireImportInput,
+  ): Promise<QuestionnaireImportCommitResult>;
+  listSurveyTemplates(
+    campaignId: string,
+  ): Promise<import("../types/database").CampaignSurveyTemplate[]>;
+  getSurveyTemplateBundle(templateId: string): Promise<SurveyTemplateBundle | null>;
+  publishSurveyTemplate(templateId: string, publishedBy: string): Promise<SurveyTemplateBundle>;
+  listSurveyInstances(
+    campaignId: string,
+  ): Promise<import("../types/database").CampaignSurveyInstance[]>;
+  openSurveyInstance(input: {
+    campaignId: string;
+    audience: import("../types/database").SurveyAudience;
+    createdBy: string;
+  }): Promise<import("../types/database").CampaignSurveyInstance>;
+  closeSurveyInstance(
+    instanceId: string,
+  ): Promise<import("../types/database").CampaignSurveyInstance>;
+  listSurveyCompletion(campaignId: string): Promise<SurveyCompletionRow[]>;
+  getSurveySectionAggregates(
+    campaignId: string,
+    audience: import("../types/database").SurveyAudience,
+  ): Promise<SurveySectionAggregate[]>;
+  getMySurveyAssignment(
+    profileId: string,
+    campaignId: string,
+  ): Promise<SurveyAssignmentBundle | null>;
+  saveSurveyAnswers(input: {
+    assignmentId: string;
+    answers: SurveyAnswerInput[];
+    submit: boolean;
+  }): Promise<SurveyAssignmentBundle>;
   listChangeRequests(): Promise<ChangeRequestView[]>;
   reviewChangeRequest(
     id: string,

@@ -18,6 +18,7 @@ export function buildCampaignAdminActions(
 ): AdminCampaignAction[] {
   const actions: AdminCampaignAction[] = [];
   const campaignPath = `/admin/campaigns/${input.campaignId}`;
+  const surveyPath = `${campaignPath}#survey`;
   const npsPath = `${campaignPath}#nps`;
 
   if (input.summary.rosterCount === 0) {
@@ -31,6 +32,17 @@ export function buildCampaignAdminActions(
     actions.push({
       label: "Assign coaches for this campaign",
       to: campaignPath,
+    });
+  }
+
+  if (
+    input.capabilities.endOfCampaignSurvey &&
+    input.summary.rosterCount > 0 &&
+    input.coachCount > 0
+  ) {
+    actions.push({
+      label: "Set up end-of-campaign questionnaire (CSV)",
+      to: surveyPath,
     });
   }
 

@@ -1149,3 +1149,62 @@ a:focus-visible {
     font-size: 30px;
   }
 }
+
+.survey-likert-field {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.survey-likert-field legend {
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 8px;
+}
+
+.survey-likert-scale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.survey-likert-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.survey-likert-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.survey-scale-end {
+  font-size: 12px;
+  min-width: 6rem;
+}
+
+.template-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.survey-col {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: var(--bg);
+}

@@ -42,12 +42,24 @@ describe("campaignUi", () => {
 });
 
 describe("campaignCapabilities", () => {
-  it("enables U24 matrix and NPS only for U24 campaigns when flags are on in mock mode", () => {
+  it("enables U24 matrix and questionnaire for U24 campaigns in mock mode", () => {
     const caps = campaignCapabilities(u24Campaign);
     expect(caps.liveMatrix).toBe(true);
-    expect(caps.coachNps).toBe(true);
+    expect(caps.endOfCampaignSurvey).toBe(true);
+    expect(caps.coachNps).toBe(false);
     expect(caps.growthMatrix).toBe(false);
     expect(caps.legacyCoachEvaluation).toBe(false);
+  });
+
+  it("enables questionnaire for the prod smoke-test campaign", () => {
+    const caps = campaignCapabilities({
+      ...u24Campaign,
+      id: "c-survey-test",
+      name: "Questionnaire smoke test",
+      team: "Test",
+    });
+    expect(caps.endOfCampaignSurvey).toBe(true);
+    expect(caps.liveMatrix).toBe(false);
   });
 
   it("withholds U24 matrix and NPS for non-U24 campaigns", () => {

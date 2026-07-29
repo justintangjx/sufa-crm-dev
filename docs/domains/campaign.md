@@ -6,16 +6,17 @@ Architecture map for U24 Worlds campaign management. Read after [`state.md`](../
 
 MVP focus is U24 Worlds 2026 (`c-u24`). SEA Games 2026 is separate legacy/sample data for Growth Matrix demos. Not part of the U24 campaign.
 
-| Table                       | Role                                                                |
-| --------------------------- | ------------------------------------------------------------------- |
-| `campaigns`                 | Training-to-competition container                                   |
-| `athletes`                  | Reusable player profile; roster identity (`email` is the login key) |
-| `campaign_members`          | Selected players on a campaign                                      |
-| `campaign_coaches`          | Coaches assigned to a campaign                                      |
-| `player_matrix_submissions` | Append-only self-evaluation history + at most one open draft        |
-| `coach_matrix_assessments`  | Append-only coach assessment history + at most one open draft       |
-| `evaluation_audit_events`   | Matrix create/update/submit audit trail                             |
-| `campaign_nps_*`            | Admin-managed mid/post bidirectional NPS (players↔coaches)          |
+| Table                         | Role                                                                                                                          |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `campaigns`                   | Training-to-competition container                                                                                             |
+| `athletes`                    | Reusable player profile; roster identity (`email` is the login key)                                                           |
+| `campaign_members`            | Selected players on a campaign                                                                                                |
+| `campaign_coaches`            | Coaches assigned to a campaign                                                                                                |
+| `player_matrix_submissions`   | Append-only self-evaluation history + at most one open draft                                                                  |
+| `coach_matrix_assessments`    | Append-only coach assessment history + at most one open draft                                                                 |
+| `evaluation_audit_events`     | Matrix create/update/submit audit trail                                                                                       |
+| `campaign_nps_*`              | Admin-managed mid/post bidirectional NPS (players↔coaches)                                                                    |
+| `campaign_survey_*` (planned) | End-of-campaign Likert questionnaire (CSV import, dual audience) — see [`campaign-survey-admin.md`](campaign-survey-admin.md) |
 
 Screens read/write through the `Api` contract. Database/RLS owns final permissions.
 

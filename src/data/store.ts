@@ -2,7 +2,7 @@
 import { buildSeed, type MockData } from "./seed";
 
 // Versioned: bump when the seed shape changes so stale localStorage is discarded.
-const DATA_KEY = "sufa-mock-data-v2";
+const DATA_KEY = "sufa-mock-data-v3";
 const USER_KEY = "sufa-mock-user";
 
 function hasStorage(): boolean {
@@ -43,6 +43,24 @@ export function getData(): MockData {
         }
         if (!memory.npsResponses) {
           memory.npsResponses = [];
+        }
+        if (!memory.surveyTemplates) {
+          memory.surveyTemplates = [];
+        }
+        if (!memory.surveySections) {
+          memory.surveySections = [];
+        }
+        if (!memory.surveyQuestions) {
+          memory.surveyQuestions = [];
+        }
+        if (!memory.surveyInstances) {
+          memory.surveyInstances = [];
+        }
+        if (!memory.surveyAssignments) {
+          memory.surveyAssignments = [];
+        }
+        if (!memory.surveyAnswers) {
+          memory.surveyAnswers = [];
         }
         return memory;
       } catch {

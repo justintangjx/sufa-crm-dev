@@ -398,3 +398,90 @@ export interface CampaignNpsResponse {
   created_at: string;
   updated_at: string;
 }
+
+export type SurveyAudience = "player" | "coach";
+
+export type SurveyTemplateStatus = "draft" | "published" | "archived";
+
+export type SurveyAnswerType = "likert" | "nps" | "text";
+
+export type SurveySubjectKind = "coaches" | "captains" | "spirit_captain" | "team" | "program";
+
+export type QuestionnaireAudienceScope = "all" | "player_only" | "coach_only";
+
+export type SurveyInstanceStatus = "draft" | "open" | "closed";
+
+export type SurveyAssignmentStatus = "pending" | "in_progress" | "submitted";
+
+export interface CampaignSurveyTemplate {
+  id: string;
+  campaign_id: string;
+  audience: SurveyAudience;
+  survey_window: NpsSurveyWindow;
+  name: string;
+  status: SurveyTemplateStatus;
+  version: number;
+  source_kind: "csv" | "manual" | null;
+  created_by: string | null;
+  published_at: string | null;
+  published_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignSurveySection {
+  id: string;
+  template_id: string;
+  title: string;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface CampaignSurveyQuestion {
+  id: string;
+  section_id: string;
+  sort_order: number;
+  prompt: string;
+  answer_type: SurveyAnswerType;
+  scale_min: number | null;
+  scale_max: number | null;
+  scale_low_label: string | null;
+  scale_high_label: string | null;
+  subject_kind: SurveySubjectKind | null;
+  required: boolean;
+  created_at: string;
+}
+
+export interface CampaignSurveyInstance {
+  id: string;
+  campaign_id: string;
+  template_id: string;
+  audience: SurveyAudience;
+  status: SurveyInstanceStatus;
+  opens_at: string | null;
+  closes_at: string | null;
+  min_response_count: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignSurveyAssignment {
+  id: string;
+  instance_id: string;
+  rater_profile_id: string;
+  status: SurveyAssignmentStatus;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignSurveyAnswer {
+  id: string;
+  assignment_id: string;
+  question_id: string;
+  numeric_value: number | null;
+  text_value: string | null;
+  created_at: string;
+  updated_at: string;
+}

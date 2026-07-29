@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin survey panel — prototype</title>
+    <style>
+      :root {
+        --text: #384152;
+        --text-h: #111827;
+        --muted: #697586;
+        --bg: #f5f7fb;
+        --surface: #fff;
+        --border: #d9e1ec;
+        --accent: #2447b8;
+        --accent-bg: #edf3ff;
+        --ok: #147a5c;
+        --ok-bg: #e3f7ef;
+        --warn: #a15c07;
+        --warn-bg: #fff2d6;
+        --danger: #b42318;
+        --danger-bg: #ffe7e3;
+        --radius: 8px;
+        --sans: system-ui, "Segoe UI", Roboto, sans-serif;
+        --display: system-ui, sans-serif;
+        font: 15px/1.5 var(--sans);
+        color: var(--text);
+        background: var(--bg);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        max-width: 1100px;
+        margin-inline: auto;
+      }
+      h1,
+      h2,
+      h3 {
+        font-family: var(--display);
+        color: var(--text-h);
+        margin: 0;
+        font-weight: 600;
+      }
+      h1 {
+        font-size: 26px;
+      }
+      h2 {
+        font-size: 19px;
+      }
+      h3 {
+        font-size: 16px;
+      }
+      .proto-bar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--text-h);
+        color: #fff;
+        padding: 12px 16px;
+        border-radius: var(--radius);
+        margin-bottom: 20px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .proto-bar label {
+        font-size: 13px;
+        opacity: 0.85;
+      }
+      .proto-bar select {
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: none;
+        font: inherit;
+      }
+      .page-head {
+        margin-bottom: 20px;
+      }
+      .page-head .eyebrow {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .page-head .subtitle {
+        color: var(--muted);
+        margin-top: 6px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        margin-bottom: 16px;
+        box-shadow: rgba(17, 24, 39, 0.04) 0 4px 16px;
+      }
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .section-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: lowercase;
+      }
+      .badge.ok {
+        background: var(--ok-bg);
+        color: var(--ok);
+      }
+      .badge.warn {
+        background: var(--warn-bg);
+        color: var(--warn);
+      }
+      .badge.accent {
+        background: var(--accent-bg);
+        color: var(--accent);
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 14px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text-h);
+        font: inherit;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .btn:hover {
+        background: var(--bg);
+      }
+      .btn.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .btn.primary:hover {
+        filter: brightness(1.05);
+      }
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .btn.sm {
+        padding: 5px 10px;
+        font-size: 13px;
+      }
+      .btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      @media (max-width: 768px) {
+        .grid-2 {
+          grid-template-columns: 1fr;
+        }
+      }
+      .survey-col {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px;
+        background: var(--bg);
+      }
+      .stat-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+      }
+      .stat {
+        text-align: center;
+        padding: 10px;
+        background: var(--surface);
+        border-radius: 6px;
+        border: 1px solid var(--border);
+      }
+      .stat-value {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text-h);
+      }
+      .stat-label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .alert {
+        padding: 10px 12px;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      .alert.ok {
+        background: var(--ok-bg);
+        color: var(--ok);
+      }
+      .alert.warn {
+        background: var(--warn-bg);
+        color: var(--warn);
+      }
+      .table-wrap {
+        overflow-x: auto;
+      }
+      table.data {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      table.data th,
+      table.data td {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      table.data th {
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .chips {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .chip {
+        padding: 4px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .chip.active {
+        background: var(--accent-bg);
+        border-color: var(--accent);
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .template-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        background: var(--bg);
+        border-radius: 6px;
+        border: 1px solid var(--border);
+      }
+      .hidden {
+        display: none !important;
+      }
+      .toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        background: var(--text-h);
+        color: #fff;
+        padding: 12px 18px;
+        border-radius: 8px;
+        font-size: 14px;
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+      }
+      .toast.show {
+        opacity: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="proto-bar">
+      <strong>Prototype state</strong>
+      <label>
+        Scenario
+        <select id="scenario">
+          <option value="empty">Empty — no template</option>
+          <option value="preview">CSV preview (before commit)</option>
+          <option value="draft">Draft templates</option>
+          <option value="published">Published, surveys closed</option>
+          <option value="player-open" selected>Player open · 14/22</option>
+          <option value="both-open">Both open</option>
+          <option value="import-error">Import errors</option>
+        </select>
+      </label>
+      <span class="muted" style="color: #ccc; font-size: 13px"
+        >Spec: docs/domains/campaign-survey-admin.md</span
+      >
+    </div>
+
+    <header class="page-head">
+      <div class="eyebrow">Campaign workspace</div>
+      <h1>U24 Worlds 2026 — Mixed</h1>
+      <p class="subtitle">Mixed · Location TBC</p>
+    </header>
+
+    <!-- Block 1: Definition -->
+    <section id="block-definition" class="card stack">
+      <div class="section-title">
+        <h2>End-of-campaign questionnaire</h2>
+        <span id="def-badge" class="badge warn">not set up</span>
+      </div>
+      <p class="muted">
+        Upload one CSV — player and coach forms are created automatically. Questions 1–8 are
+        player-only.
+      </p>
+
+      <div id="state-empty" class="stack">
+        <p>No questionnaire loaded for this campaign yet.</p>
+        <div class="btn-row">
+          <button type="button" class="btn">Download CSV template</button>
+          <label class="btn">
+            Choose CSV
+            <input type="file" hidden accept=".csv" />
+          </label>
+        </div>
+        <p class="muted">Maintain questions in Google Sheets if you like, then export as CSV.</p>
+      </div>
+
+      <div id="state-preview" class="stack hidden">
+        <p><strong>Player template: 51 questions · Coach template: 43 questions</strong></p>
+        <div class="stat-row">
+          <div class="stat">
+            <div class="stat-value">94</div>
+            <div class="stat-label">Create</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">0</div>
+            <div class="stat-label">Skip</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">0</div>
+            <div class="stat-label">Errors</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">5</div>
+            <div class="stat-label">Sections</div>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn primary">Commit questionnaire</button>
+          <button type="button" class="btn">Clear preview</button>
+        </div>
+      </div>
+
+      <div id="state-import-error" class="alert warn hidden">
+        Fix 2 row errors before committing. Nothing has been written.
+      </div>
+
+      <div id="state-templates" class="stack hidden">
+        <div class="template-row">
+          <div>
+            <strong>Player form</strong>
+            <span id="player-tpl-status" class="muted"> · Draft · 51 questions</span>
+          </div>
+          <button type="button" class="btn sm primary" id="btn-publish-player">
+            Publish player form
+          </button>
+        </div>
+        <div class="template-row">
+          <div>
+            <strong>Coach form</strong>
+            <span id="coach-tpl-status" class="muted"> · Draft · 43 questions</span>
+          </div>
+          <button type="button" class="btn sm primary" id="btn-publish-coach">
+            Publish coach form
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Blocks 2 & 3 -->
+    <div class="grid-2">
+      <section class="survey-col stack" id="col-player">
+        <div class="section-title">
+          <h3>Player survey</h3>
+          <span id="player-survey-badge" class="badge warn">closed</span>
+        </div>
+        <p class="muted" id="player-strip">Roster: 22 players · Coaches: 2</p>
+        <p id="player-status" class="muted">Publish the player form before opening.</p>
+        <div class="btn-row">
+          <button type="button" class="btn primary sm" id="btn-open-player" disabled>
+            Open player survey
+          </button>
+          <button type="button" class="btn sm" id="btn-close-player" disabled>
+            Close player survey
+          </button>
+          <button type="button" class="btn sm" id="btn-chase-player" disabled>
+            Copy chase message
+          </button>
+        </div>
+      </section>
+
+      <section class="survey-col stack" id="col-coach">
+        <div class="section-title">
+          <h3>Coach survey</h3>
+          <span id="coach-survey-badge" class="badge warn">closed</span>
+        </div>
+        <p class="muted">Coaches assigned: 2</p>
+        <p id="coach-status" class="muted">Publish the coach form before opening.</p>
+        <div class="btn-row">
+          <button type="button" class="btn primary sm" id="btn-open-coach" disabled>
+            Open coach survey
+          </button>
+          <button type="button" class="btn sm" id="btn-close-coach" disabled>
+            Close coach survey
+          </button>
+          <button type="button" class="btn sm" id="btn-chase-coach" disabled>
+            Copy chase message
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Block 4: Completion -->
+    <section class="card stack" id="block-completion">
+      <div class="section-title">
+        <h2>Who has responded</h2>
+      </div>
+      <div class="chips">
+        <span class="chip active">All</span>
+        <span class="chip">Not started</span>
+        <span class="chip">In progress</span>
+        <span class="chip">Submitted</span>
+      </div>
+      <p id="completion-empty" class="muted hidden">Open a survey to start collecting responses.</p>
+      <div id="completion-table" class="table-wrap hidden">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Role</th>
+              <th>Survey</th>
+              <th>Status</th>
+              <th>Progress</th>
+              <th>Submitted</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Alice Tan</td>
+              <td>Player</td>
+              <td>Player</td>
+              <td>Submitted</td>
+              <td>51/51</td>
+              <td>28 Jul, 09:12</td>
+            </tr>
+            <tr>
+              <td>Ben Lee</td>
+              <td>Player</td>
+              <td>Player</td>
+              <td>In progress</td>
+              <td>18/51</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td>Cara Ng</td>
+              <td>Player</td>
+              <td>Player</td>
+              <td>Not started</td>
+              <td>—</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td>Coach Kim</td>
+              <td>Coach</td>
+              <td>Coach</td>
+              <td>Submitted</td>
+              <td>43/43</td>
+              <td>28 Jul, 10:01</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Block 5: Summary -->
+    <section class="card stack" id="block-summary">
+      <div class="section-title">
+        <h2>Summary</h2>
+      </div>
+      <p class="muted">
+        Section averages only. Raw text answers are not shown here. Small groups are withheld.
+      </p>
+      <div id="summary-empty" class="muted">
+        Open a survey and wait for submissions to see summaries.
+      </div>
+      <div id="summary-table" class="table-wrap hidden">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Section</th>
+              <th>Questions</th>
+              <th>Responses</th>
+              <th>Average</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Leadership</td>
+              <td>17</td>
+              <td>14</td>
+              <td>4.1</td>
+            </tr>
+            <tr>
+              <td>Performance</td>
+              <td>18</td>
+              <td>14</td>
+              <td>3.8</td>
+            </tr>
+            <tr>
+              <td>Culture</td>
+              <td>11</td>
+              <td>14</td>
+              <td>4.3</td>
+            </tr>
+            <tr>
+              <td>Tournament experience</td>
+              <td>8</td>
+              <td>14</td>
+              <td>3.9</td>
+            </tr>
+            <tr>
+              <td>Wrap-up</td>
+              <td>3</td>
+              <td>14</td>
+              <td>NPS 42</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Block 6: Export -->
+    <section class="card stack">
+      <h2>Export</h2>
+      <div class="btn-row">
+        <button type="button" class="btn" id="btn-export-raw" disabled>
+          Download all responses (CSV)
+        </button>
+        <button type="button" class="btn" id="btn-export-summary" disabled>
+          Download summary (CSV)
+        </button>
+      </div>
+      <p id="export-hint" class="muted">No responses to export yet.</p>
+    </section>
+
+    <div id="toast" class="toast">Chase message copied. Paste into WhatsApp or Telegram.</div>
+
+    <script>
+      const scenarios = {
+        empty: {
+          defBadge: ["warn", "not set up"],
+          show: ["state-empty"],
+          published: false,
+          playerOpen: false,
+          coachOpen: false,
+          hasCompletion: false,
+          hasSummary: false,
+          exportEnabled: false,
+        },
+        preview: {
+          defBadge: ["warn", "preview"],
+          show: ["state-preview"],
+          published: false,
+          playerOpen: false,
+          coachOpen: false,
+          hasCompletion: false,
+          hasSummary: false,
+          exportEnabled: false,
+        },
+        draft: {
+          defBadge: ["warn", "draft"],
+          show: ["state-templates"],
+          tplDraft: true,
+          published: false,
+          playerOpen: false,
+          coachOpen: false,
+          hasCompletion: false,
+          hasSummary: false,
+          exportEnabled: false,
+        },
+        published: {
+          defBadge: ["ok", "published"],
+          show: ["state-templates"],
+          tplDraft: false,
+          published: true,
+          playerOpen: false,
+          coachOpen: false,
+          playerStatus: "Ready to open. 22 players will receive a survey on their next login.",
+          coachStatus: "Ready to open. 2 coaches will receive a survey on their next login.",
+          hasCompletion: false,
+          completionEmpty: "Open a survey to start collecting responses.",
+          hasSummary: false,
+          exportEnabled: false,
+        },
+        "player-open": {
+          defBadge: ["ok", "published"],
+          show: ["state-templates"],
+          tplDraft: false,
+          published: true,
+          playerOpen: true,
+          coachOpen: false,
+          playerStatus: "14 of 22 submitted · 3 in progress",
+          coachStatus: "Ready to open. 2 coaches will receive a survey on their next login.",
+          hasCompletion: true,
+          hasSummary: true,
+          exportEnabled: true,
+        },
+        "both-open": {
+          defBadge: ["ok", "published"],
+          show: ["state-templates"],
+          tplDraft: false,
+          published: true,
+          playerOpen: true,
+          coachOpen: true,
+          playerStatus: "14 of 22 submitted · 3 in progress",
+          coachStatus: "1 of 2 submitted · 0 in progress",
+          hasCompletion: true,
+          hasSummary: true,
+          exportEnabled: true,
+        },
+        "import-error": {
+          defBadge: ["warn", "preview"],
+          show: ["state-preview", "state-import-error"],
+          published: false,
+          playerOpen: false,
+          coachOpen: false,
+          hasCompletion: false,
+          hasSummary: false,
+          exportEnabled: false,
+        },
+      };
+
+      function setBadge(el, tone, text) {
+        el.className = "badge " + tone;
+        el.textContent = text;
+      }
+
+      function applyScenario(key) {
+        const s = scenarios[key];
+        document.querySelectorAll("[id^='state-']").forEach((el) => {
+          if (el.id === "state-import-error") return;
+          el.classList.add("hidden");
+        });
+        document.getElementById("state-import-error").classList.add("hidden");
+        s.show.forEach((id) => document.getElementById(id).classList.remove("hidden"));
+
+        setBadge(document.getElementById("def-badge"), s.defBadge[0], s.defBadge[1]);
+
+        const tpl = document.getElementById("state-templates");
+        if (s.show.includes("state-templates")) {
+          const ps = s.tplDraft ? " · Draft · 51 questions" : " · Published · 51 questions";
+          const cs = s.tplDraft ? " · Draft · 43 questions" : " · Published · 43 questions";
+          document.getElementById("player-tpl-status").textContent = ps;
+          document.getElementById("coach-tpl-status").textContent = cs;
+          document.getElementById("btn-publish-player").classList.toggle("hidden", !s.tplDraft);
+          document.getElementById("btn-publish-coach").classList.toggle("hidden", !s.tplDraft);
+        }
+
+        setBadge(
+          document.getElementById("player-survey-badge"),
+          s.playerOpen ? "ok" : "warn",
+          s.playerOpen ? "open" : "closed",
+        );
+        setBadge(
+          document.getElementById("coach-survey-badge"),
+          s.coachOpen ? "ok" : "warn",
+          s.coachOpen ? "open" : "closed",
+        );
+
+        document.getElementById("player-status").textContent =
+          s.playerStatus || "Publish the player form before opening.";
+        document.getElementById("coach-status").textContent =
+          s.coachStatus || "Publish the coach form before opening.";
+
+        document.getElementById("btn-open-player").disabled = !s.published || s.playerOpen;
+        document.getElementById("btn-close-player").disabled = !s.playerOpen;
+        document.getElementById("btn-chase-player").disabled = !s.published;
+
+        document.getElementById("btn-open-coach").disabled = !s.published || s.coachOpen;
+        document.getElementById("btn-close-coach").disabled = !s.coachOpen;
+        document.getElementById("btn-chase-coach").disabled = !s.published;
+
+        document.getElementById("completion-empty").classList.toggle("hidden", s.hasCompletion);
+        document.getElementById("completion-table").classList.toggle("hidden", !s.hasCompletion);
+        if (s.completionEmpty) {
+          document.getElementById("completion-empty").textContent = s.completionEmpty;
+          document.getElementById("completion-empty").classList.remove("hidden");
+        }
+
+        document.getElementById("summary-empty").classList.toggle("hidden", s.hasSummary);
+        document.getElementById("summary-table").classList.toggle("hidden", !s.hasSummary);
+
+        document.getElementById("btn-export-raw").disabled = !s.exportEnabled;
+        document.getElementById("btn-export-summary").disabled = !s.exportEnabled;
+        document.getElementById("export-hint").classList.toggle("hidden", s.exportEnabled);
+      }
+
+      document.getElementById("scenario").addEventListener("change", (e) => {
+        applyScenario(e.target.value);
+      });
+
+      function showToast() {
+        const t = document.getElementById("toast");
+        t.classList.add("show");
+        setTimeout(() => t.classList.remove("show"), 2500);
+      }
+
+      document.getElementById("btn-chase-player").addEventListener("click", () => {
+        const msg = `Hi — please complete the U24 end-of-tournament questionnaire in the SUFA CRM (about 15 min).
+
+1. Sign in with your player email: https://sufa-crm-dev.pages.dev
+2. Open campaign "U24 Worlds 2026 — Mixed"
+3. Complete the questionnaire (save as you go)
+
+Deadline: TBC
+
+Reply here if you cannot access your account.`;
+        navigator.clipboard.writeText(msg).then(showToast);
+      });
+
+      document.getElementById("btn-chase-coach").addEventListener("click", showToast);
+
+      applyScenario("player-open");
+    </script>
+  </body>
+</html>

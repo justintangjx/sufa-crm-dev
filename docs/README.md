@@ -12,15 +12,16 @@ Read tier 0 first, then one task-specific doc.
 
 ## Tier 1: read by task
 
-| Task                       | Read                                                                                |
-| -------------------------- | ----------------------------------------------------------------------------------- |
-| Deploy / flag go-no-go     | [`harness.md`](harness.md) + [`../harness/manifest.json`](../harness/manifest.json) |
-| Commands / CI              | [`tooling.md`](tooling.md)                                                          |
-| Product requirements       | [`prd.md`](../prd.md) via [`prd-index.md`](prd-index.md)                            |
-| Campaign / matrix / NPS    | [`domains/campaign.md`](domains/campaign.md)                                        |
-| Coach LLM / Edge Functions | [`coach-llm.md`](coach-llm.md)                                                      |
-| Structural refactor        | [`cleanup-refactor-plan.md`](cleanup-refactor-plan.md)                              |
-| Multi-agent parallel work  | [`agent-orchestration.md`](agent-orchestration.md)                                  |
+| Task                       | Read                                                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Deploy / flag go-no-go     | [`harness.md`](harness.md) + [`../harness/manifest.json`](../harness/manifest.json)                                      |
+| Commands / CI              | [`tooling.md`](tooling.md)                                                                                               |
+| Product requirements       | [`prd.md`](../prd.md) via [`prd-index.md`](prd-index.md)                                                                 |
+| Campaign / matrix / NPS    | [`domains/campaign.md`](domains/campaign.md)                                                                             |
+| Campaign questionnaire UX  | [`domains/campaign-survey-admin.md`](domains/campaign-survey-admin.md) + [prototype](prototypes/admin-survey-panel.html) |
+| Coach LLM / Edge Functions | [`coach-llm.md`](coach-llm.md)                                                                                           |
+| Structural refactor        | [`cleanup-refactor-plan.md`](cleanup-refactor-plan.md)                                                                   |
+| Multi-agent parallel work  | [`agent-orchestration.md`](agent-orchestration.md)                                                                       |
 
 ## Tier 2: future / deep dive
 

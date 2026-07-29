@@ -40,8 +40,13 @@ describe("App routing", () => {
     await user.click(screen.getByRole("button", { name: /send magic link/i }));
 
     expect(await screen.findByRole("heading", { name: /admin dashboard/i })).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: /u24 worlds 2026/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /u24 worlds 2026 — mixed/i }),
+    ).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: /sea games 2026/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /questionnaire smoke test/i }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText(/next admin actions/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/players travel-ready/i)).not.toBeInTheDocument();
   });
@@ -69,8 +74,9 @@ describe("App routing", () => {
 
     const campaignLinks = within(campaignPanel as HTMLElement).getAllByRole("link");
     expect(campaignLinks.map((link) => link.textContent)).toEqual([
-      "U24 Worlds 2026",
+      "U24 Worlds 2026 — Mixed",
       "SEA Games 2026",
+      "Questionnaire smoke test",
     ]);
   });
 
@@ -220,7 +226,11 @@ describe("App routing", () => {
     expect(screen.getByRole("heading", { name: /import roster csv/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /campaign roster/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /assign coaches/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /campaign nps/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /questionnaire definition/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /end-of-campaign questionnaire/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /campaign nps/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /readiness summary/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /^assistant$/i })).not.toBeInTheDocument();
   });
@@ -276,7 +286,7 @@ describe("App routing", () => {
     expect(
       screen.queryByRole("heading", { name: /player growth matrix/i }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open end-of-campaign nps/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /questionnaire definition/i })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/new coach name/i), "Coach Ng");
     await user.type(screen.getByLabelText(/coach login email/i), "coach.ng@sufa.test");

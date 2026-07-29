@@ -8,6 +8,12 @@ import type {
   CampaignNpsAssignment,
   CampaignNpsResponse,
   CampaignNpsSurvey,
+  CampaignSurveyAnswer,
+  CampaignSurveyAssignment,
+  CampaignSurveyInstance,
+  CampaignSurveyQuestion,
+  CampaignSurveySection,
+  CampaignSurveyTemplate,
   CampaignTryoutBriefing,
   ChangeRequest,
   CoachEvaluation,
@@ -45,6 +51,12 @@ export interface MockData {
   npsSurveys: CampaignNpsSurvey[];
   npsAssignments: CampaignNpsAssignment[];
   npsResponses: CampaignNpsResponse[];
+  surveyTemplates: CampaignSurveyTemplate[];
+  surveySections: CampaignSurveySection[];
+  surveyQuestions: CampaignSurveyQuestion[];
+  surveyInstances: CampaignSurveyInstance[];
+  surveyAssignments: CampaignSurveyAssignment[];
+  surveyAnswers: CampaignSurveyAnswer[];
 }
 
 const TS = "2026-01-01T00:00:00.000Z";
@@ -188,11 +200,47 @@ export function buildSeed(): MockData {
     },
     {
       id: "c-u24",
-      name: "U24 Worlds 2026",
-      team: "U24 Mixed",
+      name: "U24 Worlds 2026 — Mixed",
+      team: "Mixed",
       start_date: "2026-02-01",
       end_date: "2026-07-12",
       location: "Worlds campaign",
+      status: "active",
+      created_by: "p-admin",
+      created_at: TS,
+      updated_at: TS,
+    },
+    {
+      id: "c-u24-opens",
+      name: "U24 Worlds 2026 — Opens",
+      team: "Open",
+      start_date: "2026-02-01",
+      end_date: "2026-07-12",
+      location: "Worlds campaign",
+      status: "active",
+      created_by: "p-admin",
+      created_at: TS,
+      updated_at: TS,
+    },
+    {
+      id: "c-u24-womens",
+      name: "U24 Worlds 2026 — Womens",
+      team: "Women",
+      start_date: "2026-02-01",
+      end_date: "2026-07-12",
+      location: "Worlds campaign",
+      status: "active",
+      created_by: "p-admin",
+      created_at: TS,
+      updated_at: TS,
+    },
+    {
+      id: "c-survey-test",
+      name: "Questionnaire smoke test",
+      team: "Test",
+      start_date: "2026-02-01",
+      end_date: "2026-12-31",
+      location: "Staging",
       status: "active",
       created_by: "p-admin",
       created_at: TS,
@@ -244,6 +292,27 @@ export function buildSeed(): MockData {
       status: "invited",
       created_at: TS,
     },
+    {
+      id: "m-u24-opens-1",
+      campaign_id: "c-u24-opens",
+      athlete_id: "a-ben",
+      status: "selected",
+      created_at: TS,
+    },
+    {
+      id: "m-u24-womens-1",
+      campaign_id: "c-u24-womens",
+      athlete_id: "a-cara",
+      status: "selected",
+      created_at: TS,
+    },
+    {
+      id: "m-survey-test-1",
+      campaign_id: "c-survey-test",
+      athlete_id: "a-alice",
+      status: "selected",
+      created_at: TS,
+    },
   ];
 
   const campaignCoaches: CampaignCoach[] = [
@@ -272,6 +341,27 @@ export function buildSeed(): MockData {
       id: "cc-u24-2",
       campaign_id: "c-u24",
       coach_profile_id: "p-coach-2",
+      coach_role: "coach",
+      created_at: TS,
+    },
+    {
+      id: "cc-u24-opens-1",
+      campaign_id: "c-u24-opens",
+      coach_profile_id: "p-coach",
+      coach_role: "coach",
+      created_at: TS,
+    },
+    {
+      id: "cc-u24-womens-1",
+      campaign_id: "c-u24-womens",
+      coach_profile_id: "p-coach-2",
+      coach_role: "coach",
+      created_at: TS,
+    },
+    {
+      id: "cc-survey-test-1",
+      campaign_id: "c-survey-test",
+      coach_profile_id: "p-coach",
       coach_role: "coach",
       created_at: TS,
     },
@@ -573,6 +663,13 @@ export function buildSeed(): MockData {
 
   const npsResponses: CampaignNpsResponse[] = [];
 
+  const surveyTemplates: CampaignSurveyTemplate[] = [];
+  const surveySections: CampaignSurveySection[] = [];
+  const surveyQuestions: CampaignSurveyQuestion[] = [];
+  const surveyInstances: CampaignSurveyInstance[] = [];
+  const surveyAssignments: CampaignSurveyAssignment[] = [];
+  const surveyAnswers: CampaignSurveyAnswer[] = [];
+
   return {
     profiles,
     athletes,
@@ -595,5 +692,11 @@ export function buildSeed(): MockData {
     npsSurveys,
     npsAssignments,
     npsResponses,
+    surveyTemplates,
+    surveySections,
+    surveyQuestions,
+    surveyInstances,
+    surveyAssignments,
+    surveyAnswers,
   };
 }

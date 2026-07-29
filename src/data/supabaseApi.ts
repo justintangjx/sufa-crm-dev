@@ -84,6 +84,19 @@ import {
   matrixSubmittedAtForUpsert,
   playerMatrixFieldsFromInput,
 } from "./payloads/matrix";
+import {
+  supabaseCloseSurveyInstance,
+  supabaseCommitQuestionnaireImport,
+  supabaseGetMySurveyAssignment,
+  supabaseGetSurveySectionAggregates,
+  supabaseListSurveyCompletion,
+  supabaseListSurveyInstances,
+  supabaseListSurveyTemplates,
+  supabaseOpenSurveyInstance,
+  supabasePublishSurveyTemplate,
+  supabaseSaveSurveyAnswers,
+  supabaseGetSurveyTemplateBundle,
+} from "./supabaseSurveyApi";
 
 function client() {
   if (!supabase) {
@@ -1688,6 +1701,50 @@ export const supabaseApi: Api = {
       return;
     }
     return recordRemoteCoachNoteEditMetrics(input);
+  },
+
+  async commitQuestionnaireImport(input) {
+    return supabaseCommitQuestionnaireImport(client(), input);
+  },
+
+  async listSurveyTemplates(campaignId) {
+    return supabaseListSurveyTemplates(client(), campaignId);
+  },
+
+  async getSurveyTemplateBundle(templateId) {
+    return supabaseGetSurveyTemplateBundle(client(), templateId);
+  },
+
+  async publishSurveyTemplate(templateId, publishedBy) {
+    return supabasePublishSurveyTemplate(client(), templateId, publishedBy);
+  },
+
+  async listSurveyInstances(campaignId) {
+    return supabaseListSurveyInstances(client(), campaignId);
+  },
+
+  async openSurveyInstance(input) {
+    return supabaseOpenSurveyInstance(client(), input);
+  },
+
+  async closeSurveyInstance(instanceId) {
+    return supabaseCloseSurveyInstance(client(), instanceId);
+  },
+
+  async listSurveyCompletion(campaignId) {
+    return supabaseListSurveyCompletion(client(), campaignId);
+  },
+
+  async getSurveySectionAggregates(campaignId, audience) {
+    return supabaseGetSurveySectionAggregates(client(), campaignId, audience);
+  },
+
+  async getMySurveyAssignment(profileId, campaignId) {
+    return supabaseGetMySurveyAssignment(client(), profileId, campaignId);
+  },
+
+  async saveSurveyAnswers(input) {
+    return supabaseSaveSurveyAnswers(client(), input);
   },
 };
 
